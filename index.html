@@ -1,0 +1,1245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OCO-2 Spectra Explorer — extended</title>
+<style>
+  :root{
+    --bg:#f4f6f8; --panel:#ffffff; --sunk:#fafbfc; --hairline:#d9dee3;
+    --text:#1d2530; --muted:#5b6773; --faint:#8a97a5;
+    --model:#1f6fb2; --model-fill:rgba(31,111,178,0.10);
+    --obs:#c92a5a; --resid:#6b7d8f; --cont:#a9791f; --ghost:#9aa7b4;
+    --co2:#1f6fb2; --o2:#2e8b57; --h2o:#6a5acd; --ray:#3d9bbf; --aer:#b5651d;
+    --chip-on-bg:#1d2530; --chip-on-fg:#ffffff; --accent:#1f6fb2;
+  }
+  [data-theme="dark"]{
+    --bg:#12171d; --panel:#1a2027; --sunk:#151b21; --hairline:#2a333d;
+    --text:#e8edf2; --muted:#8a97a5; --faint:#5b6773;
+    --model:#5aa9e6; --model-fill:rgba(90,169,230,0.14); --obs:#ff5c8a;
+    --resid:#9fb0c0; --cont:#e0b64a; --ghost:#6b7a89;
+    --co2:#5aa9e6; --o2:#5fc48a; --h2o:#a99bf0; --ray:#6fc7e6; --aer:#e0a05a;
+    --chip-on-bg:#e8edf2; --chip-on-fg:#0b0f14; --accent:#5aa9e6;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;font-size:14px;line-height:1.45;-webkit-font-smoothing:antialiased}
+  .app{display:flex;flex-direction:column;height:100vh;max-width:1680px;margin:0 auto;background:var(--panel);border-left:1px solid var(--hairline);border-right:1px solid var(--hairline)}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+
+  header{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;padding:9px 14px;border-bottom:1px solid var(--hairline);flex:0 0 auto}
+  header h1{font-size:14px;font-weight:600;letter-spacing:-.01em;white-space:nowrap}
+  header h1 small{font-weight:400;color:var(--muted);font-size:12px}
+  .tabs{display:flex;gap:4px}
+  .tab,.chip,.btn{font:12px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;border:1px solid var(--hairline);border-radius:999px;padding:4px 11px;background:transparent;color:var(--text);cursor:pointer;white-space:nowrap}
+  .tab:hover,.chip:hover,.btn:hover{border-color:var(--accent)}
+  .tab.on,.chip.on{background:var(--chip-on-bg);color:var(--chip-on-fg);border-color:var(--chip-on-bg)}
+  .grow{margin-left:auto}
+  .sep{width:1px;height:20px;background:var(--hairline)}
+
+  .main{display:grid;grid-template-columns:302px minmax(0,1fr);flex:1 1 auto;min-height:0}
+  aside{border-right:1px solid var(--hairline);background:var(--sunk);overflow-y:auto;padding:4px 0 14px}
+  .grp{padding:9px 14px 11px;border-bottom:1px solid var(--hairline)}
+  .grp h2{font:11px ui-monospace,Menlo,monospace;text-transform:uppercase;letter-spacing:.08em;color:var(--faint);margin-bottom:8px}
+  .ctl{margin-bottom:9px}
+  .ctl:last-child{margin-bottom:0}
+  .ctl label{display:flex;justify-content:space-between;align-items:baseline;gap:8px;font:11px ui-monospace,Menlo,monospace;color:var(--muted)}
+  .ctl output{color:var(--text);font-weight:600;white-space:nowrap}
+  input[type=range]{width:100%;accent-color:var(--accent);margin-top:1px}
+  .chips{display:flex;flex-wrap:wrap;gap:5px}
+  .toggles{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px}
+  .hint{font:10px ui-monospace,Menlo,monospace;color:var(--faint);margin-top:7px;line-height:1.4}
+
+  .plot{position:relative;display:flex;flex-direction:column;min-width:0;min-height:0}
+  .plotwrap{position:relative;flex:1 1 auto;min-height:300px}
+  canvas{display:block;width:100%;height:100%;cursor:crosshair}
+  .hover{position:absolute;pointer-events:none;display:none;background:var(--panel);border:1px solid var(--hairline);border-radius:6px;padding:5px 9px;font:11px ui-monospace,Menlo,monospace;color:var(--text);white-space:pre;box-shadow:0 3px 12px rgba(0,0,0,.14);z-index:5}
+  .zooms{display:flex;flex-wrap:wrap;gap:6px;padding:6px 14px 0;min-height:0}
+  .legend{display:flex;flex-wrap:wrap;gap:6px 16px;padding:7px 14px 4px;font:11px ui-monospace,Menlo,monospace;color:var(--muted)}
+  .legend span{display:flex;align-items:center;gap:6px;white-space:nowrap}
+  .legend i{width:16px;height:0;border-top-width:2px;border-top-style:solid;display:inline-block}
+
+  footer{flex:0 0 auto;border-top:1px solid var(--hairline);background:var(--sunk)}
+  .readouts{display:flex;flex-wrap:wrap;gap:4px 20px;padding:7px 14px;font:11px ui-monospace,Menlo,monospace;color:var(--muted)}
+  .readouts b{color:var(--text);font-weight:600}
+  .caption{padding:2px 14px 9px;color:var(--muted);font-size:12px;max-width:130ch}
+  .caption b{color:var(--text)}
+  .note{font:10px ui-monospace,Menlo,monospace;color:var(--faint);padding:0 14px 9px;max-width:150ch;line-height:1.5}
+
+  .banner{display:none;margin:0;padding:8px 14px;font:12px ui-monospace,Menlo,monospace;border-bottom:1px solid var(--hairline)}
+  .banner.ok{display:block;background:rgba(46,139,87,.12);color:var(--text)}
+  .banner.bad{display:block;background:rgba(201,42,90,.14);color:var(--text)}
+  @media (max-width:900px){.main{grid-template-columns:1fr}aside{border-right:0;border-bottom:1px solid var(--hairline);max-height:44vh}}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>OCO-2 Spectra Explorer <small>— extended</small></h1>
+    <div class="sep"></div>
+    <div class="tabs" id="viewTabs"></div>
+    <div class="sep"></div>
+    <div class="tabs" id="focusTabs"></div>
+    <div class="grow"></div>
+    <button class="btn" id="snapBtn" title="Freeze the current curves as a dimmed reference to compare against">snapshot</button>
+    <button class="btn" id="linkBtn" title="Copy a URL that restores this exact state">link</button>
+    <button class="btn" id="csvBtn" title="Download the displayed curves as CSV">CSV ↓</button>
+    <button class="btn" id="pngBtn" title="Download this view as a PNG (2×)">PNG ↓</button>
+    <button class="btn" id="themeBtn" title="Toggle light/dark">◐</button>
+  </header>
+
+  <pre class="banner mono" id="banner"></pre>
+
+  <div class="main">
+    <aside>
+      <div class="grp">
+        <h2>Geometry</h2>
+        <div class="ctl"><label>solar zenith angle <output id="o_sza"></output></label>
+          <input type="range" id="sza" min="0" max="70" step="0.5"></div>
+        <div class="ctl"><label>viewing zenith angle <output id="o_vza"></output></label>
+          <input type="range" id="vza" min="0" max="70" step="0.5"></div>
+        <div class="hint">airmass m = 1/cos(SZA) + 1/cos(VZA). Sunlight crosses the atmosphere twice.</div>
+      </div>
+
+      <div class="grp">
+        <h2>Atmosphere</h2>
+        <div class="ctl"><label>XCO₂ <output id="o_xco2"></output></label>
+          <input type="range" id="xco2" min="380" max="440" step="0.5"></div>
+        <div class="ctl"><label>surface pressure <output id="o_psurf"></output></label>
+          <input type="range" id="psurf" min="700" max="1030" step="1"></div>
+        <div class="ctl"><label>H₂O column scale <output id="o_h2o"></output></label>
+          <input type="range" id="h2o" min="0" max="3" step="0.05"></div>
+        <div class="ctl"><label>aerosol AOD @550 nm <output id="o_aod"></output></label>
+          <input type="range" id="aod" min="0" max="0.5" step="0.005"></div>
+        <div class="ctl"><label>Ångström exponent <output id="o_angstrom"></output></label>
+          <input type="range" id="angstrom" min="0" max="2" step="0.05"></div>
+        <div class="toggles"><button class="chip" id="rayleigh">Rayleigh</button></div>
+        <div class="hint">O₂ and CO₂ columns scale with surface pressure; H₂O is a separate column scale. Aerosol and Rayleigh are <b>extinction only</b> — no scattering source term.</div>
+      </div>
+
+      <div class="grp">
+        <h2>Surface</h2>
+        <div class="chips" id="surfaces"></div>
+        <div class="toggles"><button class="chip" id="spectralAlbedo">spectral albedo</button></div>
+        <div class="ctl" style="margin-top:9px"><label>albedo scale <output id="o_albScale"></output></label>
+          <input type="range" id="albScale" min="0.2" max="2" step="0.01"></div>
+        <div class="ctl"><label>albedo slope <output id="o_albSlope"></output></label>
+          <input type="range" id="albSlope" min="-2e-4" max="2e-4" step="2e-6"></div>
+        <div class="hint">ECOSTRESS reflectance spectra. Toggle <b>spectral albedo</b> off to fall back to a single band mean — snow varies 34 % across the strong-CO₂ band, so the difference is visible.</div>
+      </div>
+
+      <div class="grp">
+        <h2>Instrument</h2>
+        <div class="ctl"><label>ILS width <output id="o_ilsStretch"></output></label>
+          <input type="range" id="ilsStretch" min="0.5" max="3" step="0.01"></div>
+        <div class="ctl"><label>spectral shift <output id="o_shiftNm"></output></label>
+          <input type="range" id="shiftNm" min="-0.05" max="0.05" step="0.001"></div>
+        <div class="ctl"><label>continuum SNR <output id="o_snr"></output></label>
+          <input type="range" id="snr" min="50" max="1000" step="10"></div>
+        <div class="toggles">
+          <button class="chip" id="noise">noise</button>
+          <button class="chip" id="legacyILS" title="Reproduce the original widget's ILS mis-centering">legacy ILS centre</button>
+        </div>
+        <div class="hint">The real OCO-2 ILS, resampled. <b>legacy ILS centre</b> reproduces the original's bug of assuming the kernel is centred on its array midpoint.</div>
+      </div>
+
+      <div class="grp">
+        <h2>Real sounding</h2>
+        <div class="toggles">
+          <button class="chip" id="obs">overlay sounding</button>
+          <button class="chip" id="loadL2">load L2 state</button>
+        </div>
+        <div class="hint" id="sndHint">—</div>
+      </div>
+
+      <div class="grp">
+        <h2>Reset</h2>
+        <div class="toggles">
+          <button class="chip" id="resetBtn">defaults</button>
+          <button class="chip" id="clearZoom">clear zoom</button>
+          <button class="chip" id="clearSnap">clear snapshot</button>
+        </div>
+      </div>
+    </aside>
+
+    <section class="plot">
+      <div class="legend" id="legend"></div>
+      <div class="plotwrap">
+        <canvas id="cv" aria-label="Top-of-atmosphere radiance spectra for the three OCO-2 bands"></canvas>
+        <div class="hover mono" id="hv"></div>
+      </div>
+      <div class="zooms" id="zooms"></div>
+    </section>
+  </div>
+
+  <footer>
+    <div class="readouts">
+      <span>airmass <b id="r_m">—</b></span>
+      <span>band albedo <b id="r_a">—</b></span>
+      <span>continuum <b id="r_c">—</b></span>
+      <span id="r_fitWrap" style="display:none">rms residual <b id="r_fit">—</b></span>
+      <span>redraw <b id="r_ms">—</b></span>
+    </div>
+    <p class="caption" id="cap"></p>
+    <p class="note" id="note"></p>
+  </footer>
+</div>
+
+<script>
+"use strict";
+/* =====================================================================
+   OCO-2 Spectra Explorer (extended)
+
+   Forward model, line-by-line, then convolved with the real OCO-2 ILS:
+     tau = psurf/P0 * (XCO2/420*tau_co2 + tau_o2) + h2o*tau_h2o + tau_ray + tau_aer
+     L   = E0 * cos(SZA) * a(lambda)/pi * exp(-m*tau),   m = 1/cos(SZA)+1/cos(VZA)
+     Lc  = E0 * cos(SZA) * a(lambda)/pi                  (continuum, no absorption)
+
+   The numerics here mirror validate.py exactly; ?selftest=1 proves it.
+   Two things this does differently from the original widget:
+     - the ILS kernel is placed using delta_lambda_nm instead of assuming the
+       array midpoint is the centre (a real bug: 22 % of FWHM in the A-band)
+     - the convolution is evaluated only at the output positions, which is
+       bit-identical to convolving the whole grid but ~14x cheaper
+   ===================================================================== */
+
+const Q = new URLSearchParams(location.search);
+const DATA = (Q.get("data") || "data").replace(/\/$/, "");
+const P0 = 1013.25, XCO2_REF = 420, AOD_REF_NM = 550;
+const ORDER = ["aband", "wco2", "sco2"];
+const BANDS = {
+  aband: { label: "O₂ A-band", short: "O₂ A", ymax: 300, um: "0.76 µm" },
+  wco2:  { label: "weak CO₂",   short: "weak CO₂", ymax: 50, um: "1.61 µm" },
+  sco2:  { label: "strong CO₂", short: "strong CO₂", ymax: 22, um: "2.06 µm" },
+};
+const SURF_NAMES = { dry_grass:"dry grass", desert:"desert", conifer:"conifer forest",
+                     snow:"snow", ocean:"water (no glint)", l2:"L2 retrieved" };
+const VIEWS = { radiance:"radiance", transmittance:"transmittance", od:"optical depth",
+                absorbers:"absorbers" };
+const ABSORBERS = [["co2","CO₂","--co2"],["o2","O₂","--o2"],["h2o","H₂O","--h2o"],
+                   ["ray","Rayleigh","--ray"],["aer","aerosol","--aer"]];
+
+/* Declared up here because setTheme() runs during boot, before the data layer
+   below has been reached -- a `let` further down would still be in its TDZ. */
+let loaded = false;
+
+/* ---- theme ---------------------------------------------------------- */
+function setTheme(dark){
+  document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
+  readPalette(); if (loaded) draw();
+}
+let C = {};
+function readPalette(){
+  const cs = getComputedStyle(document.documentElement), g = k => cs.getPropertyValue(k).trim();
+  C = { hair:g("--hairline"), text:g("--text"), muted:g("--muted"), faint:g("--faint"),
+        model:g("--model"), modelFill:g("--model-fill"), obs:g("--obs"), resid:g("--resid"),
+        cont:g("--cont"), ghost:g("--ghost"), panel:g("--panel"), accent:g("--accent"),
+        co2:g("--co2"), o2:g("--o2"), h2o:g("--h2o"), ray:g("--ray"), aer:g("--aer") };
+}
+setTheme(Q.get("theme") === "dark");
+
+/* ---- state ---------------------------------------------------------- */
+function defaults(){
+  return { xco2:420, sza:30, vza:0, psurf:1013.25, h2o:1, aod:0, angstrom:1,
+           rayleigh:false, surface:"dry_grass", albScale:1, albSlope:0,
+           spectralAlbedo:false, ilsStretch:1, shiftNm:0,
+           noise:false, snr:400, legacyILS:false,
+           view:"radiance", focus:"all", obs:false };
+}
+const NUM = ["xco2","sza","vza","psurf","h2o","aod","angstrom","albScale","albSlope",
+             "ilsStretch","shiftNm","snr"];
+const BOOL = ["rayleigh","spectralAlbedo","noise","legacyILS","obs"];
+const SLIDERS = ["sza","vza","xco2","psurf","h2o","aod","angstrom","albScale","albSlope",
+                 "ilsStretch","shiftNm","snr"];
+
+let state = defaults();
+let zoom = { aband:null, wco2:null, sco2:null };   // [lo,hi] nm per band
+let snapshot = null;                               // frozen state for the ghost curve
+
+/* ---- data loading --------------------------------------------------- */
+const B = {};            // per-band arrays
+let SND = null, ALB = null;   // `loaded` is declared near the top (boot order)
+
+const getJSON = (() => {
+  const cache = {};
+  return name => cache[name] || (cache[name] = fetch(`${DATA}/${name}`).then(r => {
+    if (!r.ok) throw new Error(`${name}: HTTP ${r.status}`); return r.json();
+  }));
+})();
+
+async function loadAll(){
+  const [alb, ...rest] = await Promise.all([
+    getJSON("albedo_surfaces.json"),
+    ...ORDER.flatMap(b => [getJSON(`tau_${b}.json`), getJSON(`solar_${b}.json`), getJSON(`ils_${b}.json`)]),
+  ]);
+  ALB = alb;
+  ORDER.forEach((b, i) => {
+    const tau = rest[i*3], sol = rest[i*3+1], ils = rest[i*3+2], m = tau.meta, n = m.n_points;
+    const wl = new Float64Array(n);
+    for (let j = 0; j < n; j++) wl[j] = m.wl_start_nm + j * m.wl_step_nm;
+    // Rayleigh template at 1013.25 hPa (Bodhaine et al. 1999), per wavelength
+    const rayTpl = new Float64Array(n);
+    for (let j = 0; j < n; j++){
+      const um = wl[j] / 1000, u2 = 1/(um*um), u4 = u2*u2;
+      rayTpl[j] = 0.008569 * u4 * (1 + 0.0113*u2 + 0.00013*u4);
+    }
+    B[b] = {
+      n, step:m.wl_step_nm, wl0:m.wl_start_nm, wl, rayTpl, meta:m,
+      tau_co2:Float64Array.from(tau.tau_co2), tau_o2:Float64Array.from(tau.tau_o2),
+      tau_h2o:Float64Array.from(tau.tau_h2o), e0:Float64Array.from(sol.e0),
+      ils_dl:Float64Array.from(ils.delta_lambda_nm), ils_r:Float64Array.from(ils.response),
+      ilsMeta:ils.meta,
+      L:new Float64Array(n), Lc:new Float64Array(n), T:new Float64Array(n),
+      albBase:{}, aerTpl:{},
+    };
+  });
+  // the sounding is optional; everything else works without it
+  try { SND = await getJSON("sounding_oco2.json"); } catch(e){ SND = null; }
+  loaded = true;
+}
+
+/* =====================================================================
+   Numerics core — must match validate.py
+   ===================================================================== */
+
+/* linear interpolation on an increasing table, 0 outside (np.interp semantics) */
+function interpZero(xp, fp, x){
+  const n = xp.length;
+  if (x < xp[0] || x > xp[n-1]) return 0;
+  let lo = 0, hi = n - 1;
+  while (hi - lo > 1){ const mid = (lo + hi) >> 1; if (xp[mid] <= x) lo = mid; else hi = mid; }
+  if (lo === n - 1 || xp[lo] === x) return fp[lo];
+  return (fp[lo+1] - fp[lo]) / (xp[lo+1] - xp[lo]) * (x - xp[lo]) + fp[lo];
+}
+
+/* Resample the ILS onto the tau grid spacing.
+   Kernel index j sits at offset (j - centre)*step from the output wavelength, so
+   putting index `centre` at the output wavelength places delta_lambda = 0 there.
+   legacy=true reproduces the original widget's array-midpoint assumption. */
+function makeKernel(d, stretch, shiftNm, legacy){
+  if (legacy){
+    const k = Float64Array.from(d.ils_r);
+    let s = 0; for (let i = 0; i < k.length; i++) s += k[i];
+    for (let i = 0; i < k.length; i++) k[i] /= s;
+    return { k, centre:(k.length - 1) >> 1 };
+  }
+  const dl = d.ils_dl, step = d.step, last = dl.length - 1;
+  const jmin = Math.ceil((stretch * dl[0] + shiftNm) / step);
+  const jmax = Math.floor((stretch * dl[last] + shiftNm) / step);
+  const K = jmax - jmin + 1;
+  const k = new Float64Array(K);
+  let s = 0;
+  for (let j = 0; j < K; j++){
+    const v = interpZero(dl, d.ils_r, ((jmin + j) * step - shiftNm) / stretch);
+    k[j] = v; s += v;
+  }
+  if (!(s > 0)) throw new Error("degenerate ILS kernel");
+  for (let j = 0; j < K; j++) k[j] /= s;
+  return { k, centre:-jmin };
+}
+
+/* Edge-normalized correlation of x with kernel k, evaluated only at idx.
+   Identical to convolving the whole grid then subsampling, at ~1/14 the cost. */
+function convAt(x, k, centre, idx, out){
+  const n = x.length, K = k.length, N = idx.length;
+  out = out || new Float64Array(N);
+  for (let o = 0; o < N; o++){
+    const lo = idx[o] - centre;
+    const j0 = lo < 0 ? 0 : lo;
+    let j1 = lo + K - 1; if (j1 > n - 1) j1 = n - 1;
+    let acc = 0, wsum = 0;
+    for (let j = j0; j <= j1; j++){ const w = k[j - lo]; acc += x[j] * w; wsum += w; }
+    out[o] = acc / wsum;
+  }
+  return out;
+}
+
+/* albedo across the band: spectral / band-mean / L2 constant, plus a slope in per-cm-1 */
+function albedoBase(band, st){
+  const d = B[band], key = st.surface + "|" + (st.spectralAlbedo ? "s" : "m");
+  if (d.albBase[key]) return d.albBase[key];
+  const a = new Float64Array(d.n);
+  if (st.surface === "l2"){
+    a.fill(SND ? SND.meta.albedo_l2[band] : 0.3);
+  } else if (st.spectralAlbedo){
+    const xw = ALB.wl, yv = ALB[st.surface];
+    for (let i = 0; i < d.n; i++) a[i] = interpClamp(xw, yv, d.wl[i]);
+  } else {
+    a.fill(ALB.band_means[st.surface][band]);
+  }
+  return (d.albBase[key] = a);
+}
+function interpClamp(xp, fp, x){
+  const n = xp.length;
+  if (x <= xp[0]) return fp[0];
+  if (x >= xp[n-1]) return fp[n-1];
+  let lo = 0, hi = n - 1;
+  while (hi - lo > 1){ const mid = (lo + hi) >> 1; if (xp[mid] <= x) lo = mid; else hi = mid; }
+  return fp[lo] + (fp[lo+1] - fp[lo]) * (x - xp[lo]) / (xp[lo+1] - xp[lo]);
+}
+/* aerosol spectral shape at unit AOD, cached per Angstrom exponent */
+function aerTemplate(band, alpha){
+  const d = B[band], key = alpha.toFixed(4);
+  if (d.aerTpl[key]) return d.aerTpl[key];
+  const t = new Float64Array(d.n);
+  for (let i = 0; i < d.n; i++) t[i] = Math.pow(d.wl[i] / AOD_REF_NM, -alpha);
+  d.aerTpl = {}; d.aerTpl[key] = t;   // only the current exponent is worth keeping
+  return t;
+}
+
+/* Fill d.L / d.Lc on the fine grid. Returns airmass and the tau pieces. */
+function forward(band, st){
+  const d = B[band], n = d.n, L = d.L, Lc = d.Lc;
+  const mu0 = Math.cos(st.sza * Math.PI / 180);
+  const m = 1 / mu0 + 1 / Math.cos(st.vza * Math.PI / 180);
+  const ps = st.psurf / P0, sx = st.xco2 / XCO2_REF;
+  const base = albedoBase(band, st);
+  const aer = st.aod > 0 ? aerTemplate(band, st.angstrom) : null;
+  const nuC = 1e7 / (0.5 * (d.wl[0] + d.wl[n-1]));
+  const co2 = d.tau_co2, o2 = d.tau_o2, h2o = d.tau_h2o, e0 = d.e0, ray = d.rayTpl;
+  const psx = ps * sx;
+  // NOTE: the arithmetic below is grouped to match validate.py term for term, so
+  // the selftest can hold to 1e-9 relative rather than absorbing regrouping error.
+  for (let i = 0; i < n; i++){
+    let t = psx * co2[i] + ps * o2[i] + st.h2o * h2o[i];
+    if (st.rayleigh) t += ps * ray[i];
+    if (aer) t += st.aod * aer[i];
+    let a = st.albScale * base[i] + st.albSlope * (1e7 / d.wl[i] - nuC);
+    if (a < 0) a = 0;
+    Lc[i] = e0[i] * mu0 * a / Math.PI;
+    L[i] = Lc[i] * Math.exp(-m * t);
+  }
+  return m;
+}
+
+/* Convolved model at integer grid indices — the one entry point used by both
+   the renderer and the selftest, so they cannot drift apart.
+   `reuseLc` lets the renderer skip re-convolving an unchanged continuum; the
+   selftest never passes it, so its comparison is always a full computation. */
+function modelAt(band, st, idx, reuseLc){
+  const d = B[band];
+  const m = forward(band, st);
+  const { k, centre } = makeKernel(d, st.ilsStretch, st.shiftNm, st.legacyILS);
+  return { L:convAt(d.L, k, centre, idx),
+           Lc:reuseLc || convAt(d.Lc, k, centre, idx),
+           m, kernel:k, centre };
+}
+
+/* The continuum does not depend on XCO2, psurf, H2O, aerosol or Rayleigh, so
+   dragging those sliders can reuse the previous convolution outright. */
+function lcSignature(band, st, idx){
+  return [band, st.sza, st.vza, st.surface, st.albScale, st.albSlope,
+          st.spectralAlbedo, st.ilsStretch, st.shiftNm, st.legacyILS,
+          idx.length, idx[0], idx[idx.length - 1]].join("|");
+}
+
+/* per-absorber apparent transmittance, convolved (absorbers view) */
+function absorberCurves(band, st, idx){
+  const d = B[band], n = d.n, ps = st.psurf / P0;
+  const { k, centre } = makeKernel(d, st.ilsStretch, st.shiftNm, st.legacyILS);
+  const mu0 = Math.cos(st.sza * Math.PI / 180);
+  const m = 1 / mu0 + 1 / Math.cos(st.vza * Math.PI / 180);
+  const aer = aerTemplate(band, st.angstrom);
+  const tmp = d.T, out = {};
+  for (const [key] of ABSORBERS){
+    for (let i = 0; i < n; i++){
+      let t;
+      switch (key){
+        case "co2": t = ps * (st.xco2 / XCO2_REF) * d.tau_co2[i]; break;
+        case "o2":  t = ps * d.tau_o2[i]; break;
+        case "h2o": t = st.h2o * d.tau_h2o[i]; break;
+        case "ray": t = st.rayleigh ? ps * d.rayTpl[i] : 0; break;
+        default:    t = st.aod > 0 ? st.aod * aer[i] : 0;
+      }
+      tmp[i] = Math.exp(-m * t);
+    }
+    out[key] = convAt(tmp, k, centre, idx);
+  }
+  return out;
+}
+
+/* deterministic noise: hashed on sample index so the curve does not shimmer */
+function gauss(i, seed){
+  let a = (i * 0x9E3779B1 + seed * 0x85EBCA77) | 0;
+  a ^= a >>> 15; a = Math.imul(a, 0x2545F491); a ^= a >>> 13;
+  let b = (i * 0xC2B2AE35 + seed * 0x27D4EB2F + 0x165667B1) | 0;
+  b ^= b >>> 16; b = Math.imul(b, 0x9E3779B1); b ^= b >>> 15;
+  const u = ((a >>> 0) + 1) / 4294967297, v = ((b >>> 0) + 1) / 4294967297;
+  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+}
+
+/* =====================================================================
+   Curve assembly per band for the current view
+   ===================================================================== */
+const PADL = 66, PADR = 18, PADT = 16, PADB = 24, HR = 26, GAP = 10;
+const cv = document.getElementById("cv"), hv = document.getElementById("hv");
+let cur = {}, ghost = {}, hoverX = null, lastMs = 0;
+let drag = null;   // {band, x0, x1, mode:'brush'|'pan', z0}
+let geom = [];     // per-panel geometry from the last render, for hit-testing
+
+function visibleRange(band){
+  const d = B[band];
+  return zoom[band] || [d.wl[0], d.wl[d.n - 1]];
+}
+function outIdx(band, nWant){
+  const d = B[band], [lo, hi] = visibleRange(band);
+  const i0 = Math.max(0, Math.floor((lo - d.wl0) / d.step));
+  const i1 = Math.min(d.n - 1, Math.ceil((hi - d.wl0) / d.step));
+  const span = i1 - i0;
+  if (span < 1) return Int32Array.from([i0, Math.min(d.n - 1, i0 + 1)]);
+  const N = Math.max(2, Math.min(nWant, span + 1));
+  const idx = new Int32Array(N);
+  for (let j = 0; j < N; j++) idx[j] = i0 + Math.round(j * span / (N - 1));
+  return idx;
+}
+
+function computeBand(band, st, nWant){
+  const d = B[band], idx = outIdx(band, nWant);
+  // a few slots, so the current state and the snapshot ghost don't evict each other
+  const sig = lcSignature(band, st, idx);
+  d._lc = d._lc || new Map();
+  const hit = d._lc.get(sig) || null;
+  const { L, Lc, m } = modelAt(band, st, idx, hit);
+  if (!hit){
+    if (d._lc.size >= 4) d._lc.delete(d._lc.keys().next().value);
+    d._lc.set(sig, Lc);
+  }
+  const wl = new Float64Array(idx.length);
+  for (let j = 0; j < idx.length; j++) wl[j] = d.wl0 + idx[j] * d.step;
+  let contMax = 0;
+  for (let j = 0; j < Lc.length; j++) if (Lc[j] > contMax) contMax = Lc[j];
+  // noise is a display effect on the modelled radiance, not part of the physics
+  let Ln = L;
+  if (st.noise && st.snr > 0){
+    const sigma = contMax / st.snr, seed = band.length + 7;
+    Ln = new Float64Array(L.length);
+    for (let j = 0; j < L.length; j++) Ln[j] = L[j] + sigma * gauss(idx[j], seed);
+  }
+  const o = { idx, wl, L:Ln, Lraw:L, Lc, m, contMax,
+              albMid:albedoAt(band, st, 0.5 * (wl[0] + wl[wl.length-1])) };
+  if (st.view === "absorbers") o.abs = absorberCurves(band, st, idx);
+  return o;
+}
+function albedoAt(band, st, lam){
+  const d = B[band];
+  const base = albedoBase(band, st);
+  const i = Math.max(0, Math.min(d.n - 1, Math.round((lam - d.wl0) / d.step)));
+  const nuC = 1e7 / (0.5 * (d.wl[0] + d.wl[d.n-1]));
+  return Math.max(0, st.albScale * base[i] + st.albSlope * (1e7 / d.wl[i] - nuC));
+}
+
+/* y-quantity for the active view */
+function yOf(c, j, view){
+  switch (view){
+    case "transmittance": return c.Lc[j] > 0 ? c.L[j] / c.Lc[j] : 0;
+    case "od": { const t = c.Lc[j] > 0 ? c.L[j] / c.Lc[j] : 1e-12;
+                 return t > 0 ? -Math.log(t) : 1e3; }
+    default: return c.L[j];
+  }
+}
+function yAxis(band, view){
+  switch (view){
+    case "transmittance": return { min:0, max:1.05, log:false, unit:"" };
+    case "od":            return { min:1e-3, max:1e2, log:true, unit:"" };
+    case "absorbers":     return { min:1e-4, max:1e2, log:true, unit:"" };
+    default:              return { min:0, max:BANDS[band].ymax, log:false,
+                                   unit:"W m⁻² µm⁻¹ sr⁻¹" };
+  }
+}
+
+/* =====================================================================
+   Rendering
+   ===================================================================== */
+function panelsShown(){ return state.focus === "all" ? ORDER : [state.focus]; }
+
+function draw(){
+  if (!loaded) return;
+  const t0 = performance.now();
+  const W = cv.clientWidth || 900;
+  const nWant = Math.max(400, Math.min(3000, Math.round((W - PADL - PADR) * 2)));
+  cur = {}; ghost = {};
+  for (const b of panelsShown()){
+    cur[b] = computeBand(b, state, nWant);
+    // ghost keeps the snapshot's physics but is plotted in the current view
+    if (snapshot) ghost[b] = computeBand(b,
+      Object.assign({}, snapshot, { noise:false, view:state.view }), nWant);
+  }
+  lastMs = performance.now() - t0;
+  render(cv.getContext("2d"), W, cv.clientHeight || 500, 1);
+  readouts();
+}
+
+function ticks(min, max, n){
+  const s0 = (max - min) / n, mag = Math.pow(10, Math.floor(Math.log10(s0)));
+  let st = mag;
+  for (const s of [1, 2, 2.5, 5, 10]) if (s0 <= s * mag){ st = s * mag; break; }
+  const out = [];
+  for (let v = Math.ceil(min / st) * st; v <= max + 1e-9; v += st) out.push(v);
+  return out;
+}
+function logTicks(min, max){
+  const out = [];
+  for (let e = Math.floor(Math.log10(min)); e <= Math.ceil(Math.log10(max)); e++){
+    const v = Math.pow(10, e); if (v >= min * 0.999 && v <= max * 1.001) out.push(v);
+  }
+  return out;
+}
+function fmtTick(v){
+  if (v === 0) return "0";
+  const a = Math.abs(v);
+  if (a >= 100) return v.toFixed(0);
+  if (a >= 1) return v.toFixed(a < 10 ? 1 : 0);
+  if (a >= 0.01) return v.toFixed(2);
+  return v.toExponential(0);
+}
+
+function render(ctx, W, H, scale){
+  const dpr = (window.devicePixelRatio || 1) * scale, canvas = ctx.canvas;
+  canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.fillStyle = C.panel; ctx.fillRect(0, 0, W, H);
+  ctx.font = "11px ui-monospace, Menlo, monospace";
+
+  const shown = panelsShown(), np = shown.length;
+  const blockH = (H - (np - 1) * GAP) / np;
+  const PH = Math.max(60, blockH - HR);
+  const fits = []; let hoverTxt = null;
+  geom = [];
+
+  shown.forEach((band, ib) => {
+    const c = cur[band]; if (!c) return;
+    const bm = BANDS[band], view = state.view, ax = yAxis(band, view);
+    const [x0, x1] = visibleRange(band);
+    const top = ib * (blockH + GAP), bot = top + PH;
+    const px = x => PADL + (x - x0) / (x1 - x0) * (W - PADL - PADR);
+    const py = v => {
+      if (ax.log){
+        const lv = Math.log10(Math.max(v, ax.min)), l0 = Math.log10(ax.min), l1 = Math.log10(ax.max);
+        return top + PADT + (1 - (lv - l0) / (l1 - l0)) * (PH - PADT - PADB);
+      }
+      return top + PADT + (1 - (v - ax.min) / (ax.max - ax.min)) * (PH - PADT - PADB);
+    };
+    geom.push({ band, top, bot, PH, px, py, x0, x1, ax });
+
+    // grid + axes
+    ctx.strokeStyle = C.hair; ctx.fillStyle = C.faint; ctx.lineWidth = 1;
+    const yt = ax.log ? logTicks(ax.min, ax.max) : ticks(ax.min, ax.max, 3);
+    for (const t of yt){
+      const y = py(t);
+      ctx.beginPath(); ctx.moveTo(PADL, y); ctx.lineTo(W - PADR, y); ctx.stroke();
+      ctx.textAlign = "right"; ctx.textBaseline = "middle"; ctx.fillText(fmtTick(t), PADL - 7, y);
+    }
+    for (const t of ticks(x0, x1, 7)){
+      if (t < x0 || t > x1) continue;
+      const X = px(t);
+      ctx.textBaseline = "top";
+      ctx.textAlign = X > W - PADR - 18 ? "right" : (X < PADL + 18 ? "left" : "center");
+      ctx.fillText(t.toFixed(x1 - x0 < 2 ? 2 : (x1 - x0 < 20 ? 1 : 0)), X, bot - PADB + 5);
+    }
+    ctx.fillStyle = C.muted; ctx.textAlign = "left"; ctx.textBaseline = "top";
+    ctx.fillText(`${bm.label} · ${bm.um} · nm`, PADL + 6, top + 2);
+    if (ib === 0){
+      ctx.textAlign = "right";
+      ctx.fillText(VIEWS[view] + (ax.unit ? "  " + ax.unit : ""), W - PADR, top + 2);
+    }
+
+    const N = c.wl.length;
+    const line = (getY, colour, width, dash) => {
+      ctx.setLineDash(dash || []); ctx.strokeStyle = colour; ctx.lineWidth = width;
+      ctx.beginPath();
+      let pen = false;
+      for (let j = 0; j < N; j++){
+        const v = getY(j);
+        if (!isFinite(v)){ pen = false; continue; }
+        const X = px(c.wl[j]), Y = py(Math.min(Math.max(v, ax.min), ax.max));
+        pen ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y); pen = true;
+      }
+      ctx.stroke(); ctx.setLineDash([]);
+    };
+
+    if (view === "absorbers"){
+      for (const [key] of ABSORBERS){
+        const T = c.abs[key];
+        // an absent absorber gives T = 1 exactly; drop it rather than pinning it
+        // to the axis floor, which would read as a real (tiny) optical depth
+        line(j => {
+          const t = T[j];
+          if (!(t > 0) || t >= 1) return NaN;
+          const od = -Math.log(t);
+          return od >= ax.min ? od : NaN;
+        }, C[key], 1.1);
+      }
+    } else {
+      // continuum (no absorption) — only meaningful in radiance space
+      if (view === "radiance") line(j => c.Lc[j], C.cont, 1.1, [5, 4]);
+      // snapshot ghost
+      const g = ghost[band];
+      if (g && g.wl.length === N) line(j => yOf(g, j, view), C.ghost, 1.1, [2, 3]);
+      // model, with a light fill in radiance view
+      if (view === "radiance"){
+        ctx.fillStyle = C.modelFill; ctx.beginPath();
+        ctx.moveTo(px(c.wl[0]), py(ax.min));
+        for (let j = 0; j < N; j++) ctx.lineTo(px(c.wl[j]), py(Math.min(c.L[j], ax.max)));
+        ctx.lineTo(px(c.wl[N-1]), py(ax.min)); ctx.closePath(); ctx.fill();
+      }
+      line(j => yOf(c, j, view), C.model, 1.1);
+    }
+
+    // ---- real sounding + residual strip -------------------------------
+    const rt = bot + 2, rb = bot + HR - 4, rmid = (rt + rb) / 2;
+    ctx.strokeStyle = C.hair; ctx.beginPath();
+    ctx.moveTo(PADL, rmid); ctx.lineTo(W - PADR, rmid); ctx.stroke();
+    ctx.fillStyle = C.faint; ctx.textAlign = "right"; ctx.textBaseline = "middle";
+    ctx.fillText("resid.", PADL - 7, rmid);
+
+    if (state.obs && SND && view !== "absorbers"){
+      const sd = SND[band], pf = SND.meta.polarization_factor || 0.5;
+      const swl = sd.wl, srad = sd.radiance, sgood = sd.good;
+      const obsY = i => {
+        const r = srad[i] / pf;
+        if (view === "radiance") return r;
+        const lc = interpAt(c.wl, c.Lc, swl[i]);
+        if (view === "transmittance") return lc > 0 ? r / lc : NaN;
+        const t = lc > 0 ? r / lc : NaN;
+        return t > 0 ? -Math.log(t) : NaN;
+      };
+      ctx.strokeStyle = C.obs; ctx.lineWidth = 0.9; ctx.beginPath();
+      let pen = false;
+      for (let i = 0; i < swl.length; i++){
+        if (!sgood[i] || swl[i] < x0 || swl[i] > x1){ pen = false; continue; }
+        const v = obsY(i);
+        if (!isFinite(v)){ pen = false; continue; }
+        const X = px(swl[i]), Y = py(Math.min(Math.max(v, ax.min), ax.max));
+        pen ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y); pen = true;
+      }
+      ctx.stroke();
+
+      // residual in radiance units, against the unnoised model
+      const res = new Array(swl.length).fill(null);
+      let se = 0, cnt = 0, rmax = 0;
+      const gwl = B[band].wl;
+      for (let i = 0; i < swl.length; i++){
+        if (!sgood[i] || swl[i] < x0 || swl[i] > x1) continue;
+        if (swl[i] < gwl[0] || swl[i] > gwl[B[band].n - 1]) continue;
+        const r = srad[i] / pf - interpAt(c.wl, c.Lraw, swl[i]);
+        res[i] = r; se += r * r; cnt++; if (Math.abs(r) > rmax) rmax = Math.abs(r);
+      }
+      if (cnt){
+        const rs = Math.max(rmax, 1e-9), ry = v => rmid - (v / rs) * ((rb - rt) / 2);
+        ctx.strokeStyle = C.resid; ctx.lineWidth = 0.9; ctx.beginPath(); pen = false;
+        for (let i = 0; i < swl.length; i++){
+          if (res[i] === null){ pen = false; continue; }
+          const X = px(swl[i]), Y = ry(res[i]);
+          pen ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y); pen = true;
+        }
+        ctx.stroke();
+        ctx.fillStyle = C.faint; ctx.textAlign = "left"; ctx.textBaseline = "top";
+        ctx.fillText("±" + rs.toFixed(rs < 1 ? 2 : 1), PADL + 4, rt - 1);
+        const rms = Math.sqrt(se / cnt);
+        fits.push(`${bm.short} ${rms.toFixed(2)} (${(100 * rms / c.contMax).toFixed(1)} %)`);
+      }
+    }
+
+    // ---- hover / brush ------------------------------------------------
+    if (scale === 1 && hoverX !== null && hoverX >= PADL && hoverX <= W - PADR){
+      const xw = x0 + (hoverX - PADL) / (W - PADL - PADR) * (x1 - x0);
+      ctx.strokeStyle = C.faint; ctx.setLineDash([3, 3]); ctx.beginPath();
+      ctx.moveTo(hoverX, top + PADT); ctx.lineTo(hoverX, bot - PADB); ctx.stroke();
+      ctx.setLineDash([]);
+      let txt = `${bm.short}  ${xw.toFixed(3)} nm`;
+      if (view === "absorbers"){
+        for (const [key, lbl] of ABSORBERS){
+          const t = interpAt(c.wl, c.abs[key], xw);
+          if (t > 0 && t < 1) txt += `\n   τ ${lbl} ${(-Math.log(t)).toExponential(2)}`;
+        }
+      } else {
+        const Lh = interpAt(c.wl, c.L, xw), Lch = interpAt(c.wl, c.Lc, xw);
+        ctx.beginPath();
+        ctx.arc(hoverX, py(Math.min(Math.max(yOf2(Lh, Lch, view), ax.min), ax.max)), 3.2, 0, 2*Math.PI);
+        ctx.fillStyle = C.model; ctx.fill();
+        ctx.lineWidth = 1.4; ctx.strokeStyle = C.panel; ctx.stroke();
+        txt += `  model ${fmtVal(yOf2(Lh, Lch, view), view)}`;
+        if (view === "radiance") txt += `  cont ${Lch.toFixed(2)}`;
+        if (state.obs && SND){
+          const sd = SND[band]; let jj = -1, best = Infinity;
+          for (let i = 0; i < sd.wl.length; i++){
+            const dd = Math.abs(sd.wl[i] - xw);
+            if (dd < best && sd.good[i]){ best = dd; jj = i; }
+          }
+          if (jj >= 0 && best < 0.1){
+            const r = sd.radiance[jj] / (SND.meta.polarization_factor || 0.5);
+            txt += `  obs ${fmtVal(view === "radiance" ? r : (view === "transmittance"
+                     ? r / Lch : -Math.log(Math.max(r / Lch, 1e-12))), view)}`;
+          }
+        }
+      }
+      hoverTxt = (hoverTxt ? hoverTxt + "\n" : "") + txt;
+    }
+    // brush rectangle
+    if (scale === 1 && drag && drag.band === band && drag.mode === "brush"
+        && Math.abs(drag.x1 - drag.x0) > 2){
+      ctx.fillStyle = C.modelFill;
+      ctx.fillRect(Math.min(drag.x0, drag.x1), top + PADT,
+                   Math.abs(drag.x1 - drag.x0), PH - PADT - PADB);
+      ctx.strokeStyle = C.accent; ctx.lineWidth = 1;
+      ctx.strokeRect(Math.min(drag.x0, drag.x1) + .5, top + PADT + .5,
+                     Math.abs(drag.x1 - drag.x0) - 1, PH - PADT - PADB - 1);
+    }
+  });
+
+  document.getElementById("r_fit").textContent =
+    fits.length ? fits.join("  ·  ") + "  W m⁻² µm⁻¹ sr⁻¹" : "—";
+
+  if (scale === 1){
+    if (hoverTxt){
+      hv.textContent = hoverTxt; hv.style.display = "block";
+      const wBox = hv.offsetWidth || 200;
+      hv.style.left = Math.max(4, Math.min(hoverX + 14, W - wBox - 8)) + "px";
+      hv.style.top = "6px";
+    } else hv.style.display = "none";
+  }
+}
+function yOf2(L, Lc, view){
+  if (view === "transmittance") return Lc > 0 ? L / Lc : 0;
+  if (view === "od") return Lc > 0 ? -Math.log(Math.max(L / Lc, 1e-12)) : 0;
+  return L;
+}
+function fmtVal(v, view){
+  if (view === "radiance") return v.toFixed(2);
+  if (view === "transmittance") return v.toFixed(4);
+  return v.toExponential(2);
+}
+/* interpolate a curve sampled at increasing wl onto an arbitrary wavelength */
+function interpAt(wl, y, x){
+  if (!y) return NaN;
+  const n = wl.length;
+  if (x <= wl[0]) return y[0];
+  if (x >= wl[n-1]) return y[n-1];
+  let lo = 0, hi = n - 1;
+  while (hi - lo > 1){ const mid = (lo + hi) >> 1; if (wl[mid] <= x) lo = mid; else hi = mid; }
+  const f = (x - wl[lo]) / (wl[lo+1] - wl[lo]);
+  return y[lo] * (1 - f) + y[lo+1] * f;
+}
+
+/* =====================================================================
+   Readouts, legend, captions
+   ===================================================================== */
+function readouts(){
+  const any = cur[panelsShown()[0]]; if (!any) return;
+  const g = id => document.getElementById(id);
+  g("r_m").textContent = any.m.toFixed(3) + "  (1/cos SZA + 1/cos VZA)";
+  g("r_a").textContent = ORDER.map(b => cur[b] ? cur[b].albMid.toFixed(3) : "—").join(" / ")
+    + `  (${SURF_NAMES[state.surface] || state.surface}${state.spectralAlbedo && state.surface !== "l2" ? ", spectral" : ""})`;
+  g("r_c").textContent = ORDER.map(b => cur[b] ? cur[b].contMax.toFixed(1) : "—").join(" / ")
+    + "  W m⁻² µm⁻¹ sr⁻¹";
+  g("r_fitWrap").style.display = state.obs && SND ? "" : "none";
+  g("r_ms").textContent = lastMs.toFixed(1) + " ms  (" + panelsShown().length + " panel"
+    + (panelsShown().length > 1 ? "s" : "") + (snapshot ? ", +ghost" : "") + ")";
+
+  // sliders + outputs
+  for (const k of SLIDERS){
+    const el = g(k); if (el && +el.value !== state[k]) el.value = state[k];
+  }
+  g("o_sza").textContent = state.sza.toFixed(1) + "°";
+  g("o_vza").textContent = state.vza.toFixed(1) + "°";
+  g("o_xco2").textContent = state.xco2.toFixed(1) + " ppm";
+  g("o_psurf").textContent = state.psurf.toFixed(0) + " hPa";
+  g("o_h2o").textContent = state.h2o.toFixed(2) + " ×";
+  g("o_aod").textContent = state.aod.toFixed(3);
+  g("o_angstrom").textContent = state.angstrom.toFixed(2);
+  g("o_albScale").textContent = state.albScale.toFixed(2) + " ×";
+  g("o_albSlope").textContent = state.albSlope.toExponential(1) + " /cm⁻¹";
+  g("o_ilsStretch").textContent = state.ilsStretch.toFixed(2) + " × FWHM";
+  g("o_shiftNm").textContent = (state.shiftNm >= 0 ? "+" : "") + state.shiftNm.toFixed(3) + " nm";
+  g("o_snr").textContent = state.snr.toFixed(0);
+
+  for (const k of BOOL) g(k) && g(k).classList.toggle("on", !!state[k]);
+  document.querySelectorAll("#surfaces .chip").forEach(b =>
+    b.classList.toggle("on", b.dataset.k === state.surface));
+  document.querySelectorAll("#viewTabs .tab").forEach(b =>
+    b.classList.toggle("on", b.dataset.k === state.view));
+  document.querySelectorAll("#focusTabs .tab").forEach(b =>
+    b.classList.toggle("on", b.dataset.k === state.focus));
+  g("clearSnap").classList.toggle("on", !!snapshot);
+
+  buildZooms(); buildLegend(); captions();
+}
+
+function buildLegend(){
+  const box = document.getElementById("legend");
+  const items = [];
+  if (state.view === "absorbers"){
+    for (const [key, lbl] of ABSORBERS) items.push([C[key], lbl, "solid"]);
+  } else {
+    if (state.view === "radiance") items.push([C.cont, "no absorption", "dashed"]);
+    items.push([C.model, "model", "solid"]);
+    if (snapshot) items.push([C.ghost, "snapshot", "dashed"]);
+    if (state.obs && SND) items.push([C.obs, "OCO-2 sounding", "solid"]);
+    if (state.obs && SND) items.push([C.resid, "residual", "solid"]);
+  }
+  box.innerHTML = items.map(([c, l, s]) =>
+    `<span><i style="border-color:${c};border-top-style:${s}"></i>${l}</span>`).join("")
+    + `<span style="margin-left:auto;color:var(--faint)">drag to zoom · shift-drag to pan · double-click to reset</span>`;
+}
+
+function buildZooms(){
+  const box = document.getElementById("zooms");
+  const on = ORDER.filter(b => zoom[b]);
+  box.innerHTML = "";
+  for (const b of on){
+    const [lo, hi] = zoom[b];
+    const el = document.createElement("button");
+    el.className = "chip on";
+    el.textContent = `${BANDS[b].short} ${lo.toFixed(2)}–${hi.toFixed(2)} nm ✕`;
+    el.onclick = () => { zoom[b] = null; draw(); };
+    box.appendChild(el);
+  }
+}
+
+function captions(){
+  const cap = document.getElementById("cap"), note = document.getElementById("note");
+  const base = `Sunlight crosses the atmosphere twice before reaching the satellite. In the <b>O₂ A-band</b> the absorber amount is known, so the band measures the light path — surface pressure, aerosols, cloud; the two <b>CO₂ bands</b> then reveal how much CO₂ that same path crossed. Move XCO₂ and the CO₂ lines deepen while the A-band holds still; raise the aerosol load and the A-band dims far more than the strong-CO₂ band, because extinction is wavelength dependent.`;
+  const extra = {
+    radiance: ` Dashed line: reflected sunlight with no absorption.`,
+    transmittance: ` <b>Transmittance</b> L/L<sub>c</sub> removes the continuum, so absorption depth is directly comparable across the three bands.`,
+    od: ` <b>Optical depth</b> −ln(L/L<sub>c</sub>) as the instrument sees it, after the ILS — deep lines saturate and flatten.`,
+    absorbers: ` <b>Absorbers</b> splits the apparent optical depth per species: O₂ owns the A-band, CO₂ the other two, and H₂O contaminates the strong-CO₂ band most.`,
+  }[state.view] || "";
+  cap.innerHTML = base + extra;
+
+  const t = B.aband ? B.aband.meta : null;
+  const parts = [];
+  if (t) parts.push(`${t.line_list}; ${t.atmosphere.split(";")[0]}.`);
+  parts.push(`Line-by-line at ${ORDER.map(b => B[b] ? B[b].step : "?").join(" / ")} nm, then convolved with the OCO-2 ILS (FWHM ${ORDER.map(b => B[b] ? B[b].ilsMeta.fwhm_nm.toFixed(3) : "—").join(" / ")} nm × ${state.ilsStretch.toFixed(2)}).`);
+  parts.push(`Solar continuum TSIS-1 HSRS × Toon lines. Surface reflectance from the ECOSTRESS library.`);
+  parts.push(`Aerosol and Rayleigh are treated as pure extinction along the slant path — there is no scattering source term, so dimming is overestimated and this is not a substitute for a real radiative-transfer solve.`);
+  if (state.legacyILS) parts.push(`⚠ legacy ILS centring is ON: the kernel is placed on its array midpoint rather than at Δλ = 0, which mis-registers the A-band model by 0.009 nm (22 % of FWHM).`);
+  if (state.noise) parts.push(`Noise is a deterministic display effect, σ = continuum/SNR, hashed on sample index.`);
+  if (state.obs && SND) parts.push(`Sounding ${SND.meta.sounding_id} (${SND.meta.surface}, ${SND.meta.time_utc.slice(0,10)}), shown ×${(1/(SND.meta.polarization_factor||0.5)).toFixed(0)} because OCO-2 measures a single linear polarization. L2 XCO₂ ${SND.meta.xco2_l2_ppm.toFixed(2)} ± ${SND.meta.xco2_uncertainty_ppm.toFixed(2)} ppm, AOD ${SND.meta.aod_total_l2.toFixed(3)}.`);
+  note.innerHTML = parts.join(" ");
+
+  const sh = document.getElementById("sndHint");
+  sh.innerHTML = SND
+    ? `${SND.meta.sounding_id} — ${SND.meta.surface}, ${SND.meta.time_utc.slice(0,10)}, ${SND.meta.operation_mode}. <b>load L2 state</b> sets SZA/VZA, surface pressure, AOD, and the retrieved per-band albedo and slope.`
+    : `sounding_oco2.json not found — overlay unavailable.`;
+}
+
+/* =====================================================================
+   Controls
+   ===================================================================== */
+function buildTabs(){
+  const vt = document.getElementById("viewTabs");
+  for (const [k, label] of Object.entries(VIEWS)){
+    const b = document.createElement("button");
+    b.className = "tab"; b.dataset.k = k; b.textContent = label;
+    b.onclick = () => { state.view = k; draw(); };
+    vt.appendChild(b);
+  }
+  const ft = document.getElementById("focusTabs");
+  for (const [k, label] of [["all", "all bands"], ...ORDER.map(b => [b, BANDS[b].short])]){
+    const b = document.createElement("button");
+    b.className = "tab"; b.dataset.k = k; b.textContent = label;
+    b.onclick = () => { state.focus = k; draw(); };
+    ft.appendChild(b);
+  }
+}
+function buildSurfaces(){
+  const box = document.getElementById("surfaces"); box.innerHTML = "";
+  const keys = ["dry_grass", "desert", "conifer", "snow", "ocean"].filter(k => ALB && ALB[k]);
+  if (SND) keys.push("l2");
+  for (const k of keys){
+    const b = document.createElement("button");
+    b.className = "chip"; b.dataset.k = k; b.textContent = SURF_NAMES[k] || k;
+    b.onclick = () => { state.surface = k; draw(); };
+    box.appendChild(b);
+  }
+}
+function wireControls(){
+  for (const k of SLIDERS){
+    const el = document.getElementById(k);
+    el.addEventListener("input", e => { state[k] = +e.target.value; draw(); });
+  }
+  for (const k of BOOL){
+    const el = document.getElementById(k); if (!el) continue;
+    el.addEventListener("click", () => {
+      if (k === "obs" && !SND) return;
+      state[k] = !state[k]; draw();
+    });
+  }
+  document.getElementById("loadL2").onclick = () => {
+    if (!SND) return;
+    const M = SND.meta;
+    Object.assign(state, {
+      xco2:M.xco2_l2_ppm, sza:M.sza, vza:M.vza, psurf:M.surface_pressure_hpa,
+      surface:"l2", spectralAlbedo:false, albScale:1,
+      albSlope:M.albedo_slope_l2_per_wn[state.focus === "all" ? "wco2" : state.focus],
+      aod:M.aod_total_l2, angstrom:1, rayleigh:true, h2o:1,
+      ilsStretch:1, shiftNm:0, legacyILS:false, obs:true,
+    });
+    draw();
+  };
+  document.getElementById("resetBtn").onclick = () => {
+    const keep = { view:state.view, focus:state.focus };
+    state = Object.assign(defaults(), keep);
+    zoom = { aband:null, wco2:null, sco2:null };
+    draw();
+  };
+  document.getElementById("clearZoom").onclick = () => {
+    zoom = { aband:null, wco2:null, sco2:null }; draw();
+  };
+  document.getElementById("snapBtn").onclick = () => {
+    snapshot = JSON.parse(JSON.stringify(state)); draw();
+  };
+  document.getElementById("clearSnap").onclick = () => { snapshot = null; draw(); };
+  document.getElementById("themeBtn").onclick = () =>
+    setTheme(document.documentElement.getAttribute("data-theme") !== "dark");
+  document.getElementById("linkBtn").onclick = copyLink;
+  document.getElementById("csvBtn").onclick = exportCSV;
+  document.getElementById("pngBtn").onclick = exportPNG;
+}
+
+/* ---- pointer interaction: hover, brush-zoom, pan --------------------- */
+/* which panel is this y in? falls back to the nearest one so clicks in the gap work */
+function bandAt(y){
+  if (!geom.length) return null;
+  for (const g of geom) if (y >= g.top && y <= g.bot + HR) return g;
+  let best = geom[0], bestD = Infinity;
+  for (const g of geom){
+    const d = y < g.top ? g.top - y : y - (g.bot + HR);
+    if (d < bestD){ bestD = d; best = g; }
+  }
+  return best;
+}
+cv.addEventListener("pointerdown", e => {
+  const r = cv.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
+  const g = bandAt(y); if (!g) return;
+  // panning only means something once zoomed in; otherwise treat it as a brush
+  const mode = e.shiftKey && zoom[g.band] ? "pan" : "brush";
+  drag = { band:g.band, x0:x, x1:x, mode,
+           z0:zoom[g.band] ? zoom[g.band].slice() : [g.x0, g.x1], W:cv.clientWidth };
+  cv.setPointerCapture(e.pointerId);
+});
+cv.addEventListener("pointermove", e => {
+  const r = cv.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
+  hoverX = x;
+  if (drag){
+    drag.x1 = x;
+    if (drag.mode === "pan"){
+      const g = geom.find(q => q.band === drag.band);
+      if (g){
+        const span = drag.z0[1] - drag.z0[0];
+        const dnm = -(x - drag.x0) / (drag.W - PADL - PADR) * span;
+        const d = B[drag.band], lo0 = d.wl[0], hi0 = d.wl[d.n - 1];
+        let lo = drag.z0[0] + dnm, hi = drag.z0[1] + dnm;
+        if (lo < lo0){ hi += lo0 - lo; lo = lo0; }
+        if (hi > hi0){ lo -= hi - hi0; hi = hi0; }
+        zoom[drag.band] = [Math.max(lo0, lo), Math.min(hi0, hi)];
+      }
+      draw(); return;
+    }
+  }
+  if (loaded) render(cv.getContext("2d"), cv.clientWidth, cv.clientHeight, 1);
+});
+cv.addEventListener("pointerup", e => {
+  if (drag && drag.mode === "brush" && Math.abs(drag.x1 - drag.x0) > 4){
+    const g = geom.find(q => q.band === drag.band);
+    if (g){
+      const W = cv.clientWidth;
+      const toNm = px => g.x0 + (px - PADL) / (W - PADL - PADR) * (g.x1 - g.x0);
+      let lo = toNm(Math.min(drag.x0, drag.x1)), hi = toNm(Math.max(drag.x0, drag.x1));
+      const d = B[drag.band];
+      lo = Math.max(d.wl[0], lo); hi = Math.min(d.wl[d.n - 1], hi);
+      if (hi - lo > 3 * d.step) zoom[drag.band] = [lo, hi];
+    }
+  }
+  drag = null; draw();
+});
+cv.addEventListener("pointerleave", () => {
+  hoverX = null;
+  if (loaded && !drag) render(cv.getContext("2d"), cv.clientWidth, cv.clientHeight, 1);
+});
+cv.addEventListener("dblclick", e => {
+  const r = cv.getBoundingClientRect(), g = bandAt(e.clientY - r.top);
+  if (g){ zoom[g.band] = null; draw(); }
+});
+new ResizeObserver(() => { if (loaded) draw(); }).observe(cv.parentElement);
+
+/* ---- permalink ------------------------------------------------------- */
+function stateToQuery(){
+  const p = new URLSearchParams();
+  const d = defaults();
+  for (const k of NUM) if (state[k] !== d[k]) p.set(k, String(+state[k].toPrecision(8)));
+  for (const k of BOOL) if (state[k] !== d[k]) p.set(k, "1");
+  if (state.surface !== d.surface) p.set("surface", state.surface);
+  if (state.view !== d.view) p.set("view", state.view);
+  if (state.focus !== d.focus) p.set("focus", state.focus);
+  for (const b of ORDER) if (zoom[b]) p.set("z_" + b, zoom[b].map(v => v.toFixed(3)).join(","));
+  if (Q.get("data")) p.set("data", Q.get("data"));
+  if (document.documentElement.getAttribute("data-theme") === "dark") p.set("theme", "dark");
+  return p.toString();
+}
+function queryToState(){
+  for (const k of NUM) if (Q.has(k)){ const v = +Q.get(k); if (isFinite(v)) state[k] = v; }
+  for (const k of BOOL) if (Q.has(k)) state[k] = Q.get(k) !== "0";
+  if (Q.has("surface") && SURF_NAMES[Q.get("surface")]) state.surface = Q.get("surface");
+  if (VIEWS[Q.get("view")]) state.view = Q.get("view");
+  const f = Q.get("focus"); if (f === "all" || ORDER.includes(f)) state.focus = f;
+  for (const b of ORDER){
+    const z = Q.get("z_" + b); if (!z) continue;
+    let [lo, hi] = z.split(",").map(Number);
+    const d = B[b];
+    if (!isFinite(lo) || !isFinite(hi)) continue;
+    lo = Math.max(d.wl[0], Math.min(lo, d.wl[d.n - 1]));
+    hi = Math.max(d.wl[0], Math.min(hi, d.wl[d.n - 1]));
+    if (hi - lo > 3 * d.step) zoom[b] = [lo, hi];
+  }
+  if (state.obs && !SND) state.obs = false;
+}
+function copyLink(){
+  const url = location.origin + location.pathname + "?" + stateToQuery();
+  const done = ok => banner(ok ? "link copied to clipboard" : "copy failed — URL is in the address bar", ok);
+  history.replaceState(null, "", "?" + stateToQuery());
+  if (navigator.clipboard) navigator.clipboard.writeText(url).then(() => done(true), () => done(false));
+  else done(false);
+}
+
+/* ---- exports --------------------------------------------------------- */
+function exportCSV(){
+  const rows = [["band", "wavelength_nm", "radiance_model", "continuum",
+                 "transmittance", "sounding_radiance"]];
+  for (const b of panelsShown()){
+    const c = cur[b]; if (!c) continue;
+    const sd = state.obs && SND ? SND[b] : null;
+    const pf = SND ? (SND.meta.polarization_factor || 0.5) : 0.5;
+    for (let j = 0; j < c.wl.length; j++){
+      let obs = "";
+      if (sd){
+        let jj = -1, best = Infinity;
+        for (let i = 0; i < sd.wl.length; i++){
+          const dd = Math.abs(sd.wl[i] - c.wl[j]);
+          if (dd < best && sd.good[i]){ best = dd; jj = i; }
+        }
+        if (jj >= 0 && best < 0.05) obs = (sd.radiance[jj] / pf).toFixed(4);
+      }
+      rows.push([b, c.wl[j].toFixed(4), c.L[j].toFixed(5), c.Lc[j].toFixed(5),
+                 (c.Lc[j] > 0 ? c.L[j] / c.Lc[j] : 0).toFixed(6), obs]);
+    }
+  }
+  const meta = ["# OCO-2 Spectra Explorer (extended)",
+    "# " + Object.entries(state).map(([k, v]) => `${k}=${v}`).join(" "),
+    "# radiance units W m-2 um-1 sr-1; sounding divided by polarization factor"].join("\n");
+  download(new Blob([meta + "\n" + rows.map(r => r.join(",")).join("\n")],
+    { type:"text/csv" }), `oco_spectra_${tag()}.csv`);
+}
+function exportPNG(){
+  const off = document.createElement("canvas");
+  const W = cv.clientWidth || 900, H = cv.clientHeight || 500;
+  const hx = hoverX; hoverX = null;
+  render(off.getContext("2d"), W, H, 2 / (window.devicePixelRatio || 1));
+  hoverX = hx;
+  off.toBlob(b => download(b, `oco_spectra_${tag()}.png`), "image/png");
+  render(cv.getContext("2d"), W, H, 1);
+}
+function tag(){
+  return `${state.view}_xco2${state.xco2}_sza${state.sza}_p${Math.round(state.psurf)}`
+    + (state.aod > 0 ? `_aod${state.aod}` : "");
+}
+function download(blob, name){
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = name; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+}
+function banner(msg, ok){
+  const el = document.getElementById("banner");
+  el.textContent = msg; el.className = "banner mono " + (ok ? "ok" : "bad");
+  if (ok) setTimeout(() => { el.className = "banner mono"; }, 2500);
+}
+
+/* =====================================================================
+   Selftest: prove the JS matches validate.py
+   ===================================================================== */
+async function selftest(){
+  let ref;
+  try { ref = await getJSON("selftest_reference.json"); }
+  catch(e){ banner("selftest: data/selftest_reference.json not found — run: python3 validate.py", false); return; }
+  const tol = ref.tolerance_rel || 1e-9;
+  let worst = 0, worstWhere = "", checked = 0, bad = 0;
+  const lines = [];
+  for (const cs of ref.cases){
+    const st = Object.assign(defaults(), cs.state);
+    let cmax = 0;
+    for (const band of ORDER){
+      const e = cs.bands[band];
+      const idx = Int32Array.from(e.idx);
+      const { L, Lc, m, kernel, centre } = modelAt(band, st, idx);
+      if (kernel.length !== e.kernel_len || centre !== e.kernel_centre){
+        bad++; lines.push(`  ${cs.name}/${band}: kernel ${kernel.length}@${centre} != ref ${e.kernel_len}@${e.kernel_centre}`);
+      }
+      if (Math.abs(m - e.airmass) > 1e-12){
+        bad++; lines.push(`  ${cs.name}/${band}: airmass ${m} != ${e.airmass}`);
+      }
+      for (let j = 0; j < idx.length; j++){
+        for (const [got, want] of [[L[j], e.L[j]], [Lc[j], e.Lc[j]]]){
+          const denom = Math.max(Math.abs(want), 1e-30);
+          const rel = Math.abs(got - want) / denom;
+          checked++;
+          if (rel > cmax) cmax = rel;
+          if (rel > worst){ worst = rel; worstWhere = `${cs.name}/${band}[${idx[j]}]`; }
+          if (rel > tol) bad++;
+        }
+      }
+    }
+    lines.push(`  ${cs.name.padEnd(20)} max rel dev ${cmax.toExponential(2)}`);
+  }
+  // Render sweep: every view x focus, plus the overlay, snapshot and zoom paths.
+  // Catches TDZ/typo/axis errors in code paths a single default render never hits.
+  const saved = JSON.parse(JSON.stringify(state)), savedSnap = snapshot;
+  const savedZoom = JSON.parse(JSON.stringify(zoom));
+  let renders = 0;
+  for (const view of Object.keys(VIEWS)){
+    for (const focus of ["all", ...ORDER]){
+      for (const obs of (SND ? [false, true] : [false])){
+        state = Object.assign(JSON.parse(JSON.stringify(saved)),
+          { view, focus, obs, rayleigh:true, aod:0.2, noise:true, spectralAlbedo:true });
+        try { draw(); renders++; }
+        catch(e){ bad++; lines.push(`  render ${view}/${focus}/obs=${obs}: ${e}`); }
+      }
+    }
+  }
+  // snapshot + zoom together, in the default view
+  try {
+    state = Object.assign(JSON.parse(JSON.stringify(saved)), { view:"radiance", focus:"all" });
+    snapshot = Object.assign(JSON.parse(JSON.stringify(saved)), { xco2:400 });
+    const d = B.aband;
+    zoom.aband = [d.wl[0] + 1, d.wl[0] + 2];
+    draw(); renders++;
+  } catch(e){ bad++; lines.push(`  render snapshot+zoom: ${e}`); }
+  state = saved; snapshot = savedSnap; zoom = savedZoom;
+  try { draw(); } catch(e){ bad++; lines.push(`  render restore: ${e}`); }
+  lines.push(`  render sweep          ${renders} configurations drawn`);
+
+  const head = bad === 0
+    ? `SELFTEST PASS — ${checked} values across ${ref.cases.length} cases match validate.py within ${tol.toExponential(0)} (worst ${worst.toExponential(2)} at ${worstWhere}); ${renders} render configurations clean`
+    : `SELFTEST FAIL — ${bad} problem(s); worst numeric deviation ${worst.toExponential(2)} at ${worstWhere}`;
+  banner(head + "\n" + lines.join("\n"), bad === 0);
+  (bad === 0 ? console.log : console.error)(head + "\n" + lines.join("\n"));
+}
+
+/* =====================================================================
+   Boot
+   ===================================================================== */
+(async function main(){
+  try { await loadAll(); }
+  catch(e){
+    banner(`data files not found under "${DATA}/" (${e.message}). Serve the project root, `
+      + `e.g. python3 -m http.server 8000, or pass ?data=<dir>.`, false);
+    return;
+  }
+  queryToState();
+  buildTabs(); buildSurfaces(); wireControls();
+  draw();
+  if (Q.get("selftest") === "1") selftest();
+})();
+</script>
+</body>
+</html>
