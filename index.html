@@ -104,17 +104,31 @@
       <div class="grp">
         <h2>Atmosphere</h2>
         <div class="ctl"><label>XCO₂ <output id="o_xco2"></output></label>
-          <input type="range" id="xco2" min="0" max="440" step="0.5"></div>
+          <input type="range" id="xco2" min="0" max="800" step="0.5"></div>
         <div class="ctl"><label>surface pressure <output id="o_psurf"></output></label>
           <input type="range" id="psurf" min="0" max="1030" step="1"></div>
         <div class="ctl"><label>H₂O column scale <output id="o_h2o"></output></label>
-          <input type="range" id="h2o" min="0" max="3" step="0.05"></div>
+          <input type="range" id="h2o" min="0" max="10" step="0.05"></div>
+        <div class="hint">O₂, CO₂ and Rayleigh scale with surface pressure, so at 0 hPa they vanish — but H₂O does not follow (it is a fixed tropospheric column in the data), so zero its own slider too for a true vacuum.</div>
+      </div>
+
+      <div class="grp">
+        <h2>Aerosol &amp; scattering</h2>
         <div class="ctl"><label>aerosol AOD @550 nm <output id="o_aod"></output></label>
-          <input type="range" id="aod" min="0" max="0.5" step="0.005"></div>
+          <input type="range" id="aod" min="0" max="1.5" step="0.005"></div>
         <div class="ctl"><label>Ångström exponent <output id="o_angstrom"></output></label>
           <input type="range" id="angstrom" min="0" max="2" step="0.05"></div>
-        <div class="toggles"><button class="chip" id="rayleigh">Rayleigh</button></div>
-        <div class="hint">O₂, CO₂ and Rayleigh scale with surface pressure, so at 0 hPa they vanish — but H₂O does not follow (it is a fixed tropospheric column in the data), so zero its own slider too for a true vacuum. Aerosol and Rayleigh are <b>extinction only</b>: no scattering source term, so dimming is overestimated.</div>
+        <div class="ctl"><label>single-scatter albedo ω₀ <output id="o_ssa"></output></label>
+          <input type="range" id="ssa" min="0.5" max="1" step="0.005"></div>
+        <div class="ctl"><label>asymmetry g <output id="o_asym"></output></label>
+          <input type="range" id="asym" min="0" max="0.9" step="0.01"></div>
+        <div class="ctl"><label>aerosol layer <output id="o_aerP"></output></label>
+          <input type="range" id="aerP" min="50" max="1030" step="5"></div>
+        <div class="toggles">
+          <button class="chip" id="scatter">two-stream scattering</button>
+          <button class="chip" id="rayleigh">Rayleigh</button>
+        </div>
+        <div class="hint">With <b>two-stream scattering</b> on, the layer is coupled to the surface: photons taken out of the beam still reach the ground diffusely and still return, so a bright scattering aerosol barely dims the scene. Turn it off for <b>extinction only</b> and watch the A-band collapse — that is what the simple exp(−mτ) treatment gets wrong. Raising the layer shortens the path for atmospherically scattered photons, which is how aerosol biases retrieved XCO₂.</div>
       </div>
 
       <div class="grp">
@@ -181,6 +195,7 @@
     </div>
     <p class="caption" id="cap"></p>
     <p class="note" id="note"></p>
+    <p class="note" id="ack"></p>
   </footer>
 </div>
 
@@ -240,16 +255,17 @@ setTheme(Q.get("theme") === "dark");
 /* ---- state ---------------------------------------------------------- */
 function defaults(){
   return { xco2:420, sza:30, vza:0, psurf:1013.25, h2o:1, aod:0, angstrom:1,
-           rayleigh:false, surface:"dry_grass", albScale:1, albSlope:0,
+           rayleigh:false, scatter:true, ssa:0.95, asym:0.65, aerP:800,
+           surface:"dry_grass", albScale:1, albSlope:0,
            spectralAlbedo:false, ilsStretch:1, shiftNm:0,
            noise:false, snr:400,
            view:"radiance", focus:"all", obs:false };
 }
-const NUM = ["xco2","sza","vza","psurf","h2o","aod","angstrom","albScale","albSlope",
-             "ilsStretch","shiftNm","snr"];
-const BOOL = ["rayleigh","spectralAlbedo","noise","obs"];
-const SLIDERS = ["sza","vza","xco2","psurf","h2o","aod","angstrom","albScale","albSlope",
-                 "ilsStretch","shiftNm","snr"];
+const NUM = ["xco2","sza","vza","psurf","h2o","aod","angstrom","ssa","asym","aerP",
+             "albScale","albSlope","ilsStretch","shiftNm","snr"];
+const BOOL = ["rayleigh","scatter","spectralAlbedo","noise","obs"];
+const SLIDERS = ["sza","vza","xco2","psurf","h2o","aod","angstrom","ssa","asym","aerP",
+                 "albScale","albSlope","ilsStretch","shiftNm","snr"];
 
 let state = defaults();
 let zoom = { aband:null, wco2:null, sco2:null };   // [lo,hi] nm per band
@@ -388,7 +404,75 @@ function aerTemplate(band, alpha){
   return t;
 }
 
-/* Fill d.L / d.Lc on the fine grid. Returns airmass and the tau pieces. */
+/* ---- scattering: one two-stream layer coupled to the Lambertian surface ------
+   Pure extinction is badly wrong for a scattering layer: photons taken out of the
+   direct beam still reach the surface diffusely and still come back up. Extinction
+   only dims the A-band 10.2 % at the sounding's AOD; this treatment dims it 0.35 %
+   and matches a Monte Carlo reference to <0.009 in system albedo.
+   Mirrors validate.py term for term so the selftest holds to 1e-9. ------------ */
+const clip01 = v => v < 0 ? 0 : (v > 1 ? 1 : v);
+
+/* Meador & Weaver (1980), Eddington closure: collimated beam, black lower
+   boundary. Delta-Eddington scaling is applied first. Returns [R, T_total]. */
+function twoStreamBeam(tau, w, g, mu0){
+  const f = g * g;
+  const t = (1 - w * f) * tau;
+  let ws = w * (1 - f) / (1 - w * f);
+  if (ws < 0) ws = 0; else if (ws > 1 - 1e-7) ws = 1 - 1e-7;
+  const gs = g / (1 + g);
+  const g1 = (7 - ws * (4 + 3 * gs)) / 4;
+  const g2 = -(1 - ws * (4 - 3 * gs)) / 4;
+  const lam = Math.sqrt(Math.max(g1 * g1 - g2 * g2, 1e-30));
+  // lam*mu0 == 1 is a removable singularity of this closed form; nudge off it
+  const mu = Math.abs(1 - (lam * mu0) * (lam * mu0)) < 1e-4 ? mu0 * (1 - 3e-3) : mu0;
+  const g3 = (2 - 3 * gs * mu) / 4, g4 = 1 - g3;
+  const a1 = g1 * g4 + g2 * g3, a2 = g1 * g3 + g2 * g4;
+  const el = Math.exp(Math.min(lam * t, 700)), eml = Math.exp(-lam * t);
+  const e0 = Math.exp(-Math.min(t / mu, 700));
+  const den = (lam + g1) * el + (lam - g1) * eml;
+  const q = 1 - (lam * mu) * (lam * mu);
+  const R = (ws / (q * den)) * ((1 - lam * mu) * (a2 + lam * g3) * el
+                                - (1 + lam * mu) * (a2 - lam * g3) * eml
+                                - 2 * lam * (g3 - a2 * mu) * e0);
+  const Td = -(ws / (q * den)) * ((1 + lam * mu) * (a1 + lam * g4) * el * e0
+                                  - (1 - lam * mu) * (a1 - lam * g4) * eml * e0
+                                  - 2 * lam * (g4 + a1 * mu));
+  return [clip01(R), clip01(Td + e0)];
+}
+
+/* Classical two-stream, diffuse illumination: spherical albedo and diffuse
+   transmittance, for the upward path off a Lambertian surface. */
+function twoStreamDiffuse(tau, w, g){
+  const f = g * g;
+  const t = (1 - w * f) * tau;
+  let ws = w * (1 - f) / (1 - w * f);
+  if (ws < 0) ws = 0; else if (ws > 1 - 1e-7) ws = 1 - 1e-7;
+  const gs = g / (1 + g);
+  // Threshold is looser than the 1-1e-7 clip above, or this branch could never
+  // trigger -- and Rayleigh with no aerosol gives w = 1 exactly.
+  if (ws >= 1 - 1e-6){                       // conservative limit (the form is 0/0)
+    const qc = 0.75 * (1 - gs) * t;
+    return [clip01(qc / (1 + qc)), clip01(1 / (1 + qc))];
+  }
+  const u = Math.sqrt((1 - ws) / (1 - ws * gs));
+  const rinf = (1 - u) / (1 + u);
+  const k = Math.sqrt(3 * (1 - ws) * (1 - ws * gs));
+  const e = Math.exp(-2 * k * t);
+  const R = rinf * (1 - e) / (1 - rinf * rinf * e);
+  const T = (1 - rinf * rinf) * Math.exp(-k * t) / (1 - rinf * rinf * e);
+  return [clip01(R), clip01(T)];
+}
+
+/* Fill d.L / d.Lc on the fine grid. Returns airmass.
+   With scattering on, the signal splits into two paths with DIFFERENT gas path
+   lengths, so it no longer factorises as continuum x exp(-m tau):
+
+     L = (E0 mu0/pi) [ R_beam . exp(-m f tau_gas)            <- atmospheric path
+                     + T_beam a Tdiff exp(-m tau_gas)/(1-a s) ]  <- surface path
+
+   The first term only crosses the gas ABOVE the layer -- the mechanism behind
+   aerosol-induced XCO2 bias. With aod = 0 and Rayleigh off this reduces exactly
+   to the old L = Lc exp(-m tau). */
 function forward(band, st){
   const d = B[band], n = d.n, L = d.L, Lc = d.Lc;
   const mu0 = Math.cos(st.sza * Math.PI / 180);
@@ -399,16 +483,33 @@ function forward(band, st){
   const nuC = 1e7 / (0.5 * (d.wl[0] + d.wl[n-1]));
   const co2 = d.tau_co2, o2 = d.tau_o2, h2o = d.tau_h2o, e0 = d.e0, ray = d.rayTpl;
   const psx = ps * sx;
-  // NOTE: the arithmetic below is grouped to match validate.py term for term, so
-  // the selftest can hold to 1e-9 relative rather than absorbing regrouping error.
+  // scalar branch condition, mirroring validate.py exactly
+  const haveSc = st.aod > 0 || (st.rayleigh && st.psurf > 0);
+  const useSc = st.scatter !== false && haveSc;
+  const fAer = Math.max(0, Math.min(1, st.aerP / Math.max(st.psurf, 1e-9)));
+  // NOTE: arithmetic grouped to match validate.py term for term.
   for (let i = 0; i < n; i++){
-    let t = psx * co2[i] + ps * o2[i] + st.h2o * h2o[i];
-    if (st.rayleigh) t += ps * ray[i];
-    if (aer) t += st.aod * aer[i];
+    const tGas = psx * co2[i] + ps * o2[i] + st.h2o * h2o[i];
+    const tRay = st.rayleigh ? ps * ray[i] : 0;
+    const tAer = aer ? st.aod * aer[i] : 0;
     let a = st.albScale * base[i] + st.albSlope * (1e7 / d.wl[i] - nuC);
     if (a < 0) a = 0;
-    Lc[i] = e0[i] * mu0 * a / Math.PI;
-    L[i] = Lc[i] * Math.exp(-m * t);
+    const solar = e0[i] * mu0 / Math.PI;
+    if (!useSc){
+      Lc[i] = solar * a;
+      L[i] = Lc[i] * Math.exp(-m * (tGas + tRay + tAer));
+      continue;
+    }
+    const tSc = tRay + tAer;
+    // tau-weighted mixing of Rayleigh (w=1, g=0, f=0.5) and aerosol
+    const w = tSc > 0 ? (tRay * 1.0 + tAer * st.ssa) / tSc : 1.0;
+    const g = tSc > 0 ? (tRay * 0.0 + tAer * st.asym) / tSc : 0.0;
+    const fSc = tSc > 0 ? (tRay * 0.5 + tAer * fAer) / tSc : 1.0;
+    const rt = twoStreamBeam(tSc, w, g, mu0);
+    const dt = twoStreamDiffuse(tSc, w, g);
+    const surf = rt[1] * a * dt[1] / Math.max(1 - a * dt[0], 1e-12);
+    Lc[i] = solar * (rt[0] + surf);
+    L[i] = solar * (rt[0] * Math.exp(-m * fSc * tGas) + surf * Math.exp(-m * tGas));
   }
   return m;
 }
@@ -426,11 +527,13 @@ function modelAt(band, st, idx, reuseLc){
            m, kernel:k, centre };
 }
 
-/* The continuum does not depend on XCO2, psurf, H2O, aerosol or Rayleigh, so
-   dragging those sliders can reuse the previous convolution outright. */
+/* With scattering on the continuum absorbs the aerosol/Rayleigh layer too, so the
+   signature has to cover it. XCO2 and H2O still never touch the continuum, and
+   those are the two most-dragged sliders, so the cache still earns its keep. */
 function lcSignature(band, st, idx){
-  return [band, st.sza, st.vza, st.surface, st.albScale, st.albSlope,
+  return [band, st.sza, st.vza, st.psurf, st.surface, st.albScale, st.albSlope,
           st.spectralAlbedo, st.ilsStretch, st.shiftNm,
+          st.scatter, st.aod, st.angstrom, st.rayleigh, st.ssa, st.asym, st.aerP,
           idx.length, idx[0], idx[idx.length - 1]].join("|");
 }
 
@@ -857,6 +960,10 @@ function readouts(){
   g("o_h2o").textContent = state.h2o.toFixed(2) + " ×";
   g("o_aod").textContent = state.aod.toFixed(3);
   g("o_angstrom").textContent = state.angstrom.toFixed(2);
+  g("o_ssa").textContent = state.ssa.toFixed(3);
+  g("o_asym").textContent = state.asym.toFixed(2);
+  g("o_aerP").textContent = state.aerP.toFixed(0) + " hPa"
+    + (state.aod > 0 ? "  (f=" + Math.max(0, Math.min(1, state.aerP/Math.max(state.psurf,1e-9))).toFixed(2) + ")" : "");
   g("o_albScale").textContent = state.albScale.toFixed(2) + " ×";
   g("o_albSlope").textContent = state.albSlope.toExponential(1) + " /cm⁻¹";
   g("o_ilsStretch").textContent = state.ilsStretch.toFixed(2) + " × FWHM";
@@ -922,10 +1029,20 @@ function captions(){
   if (t) parts.push(`${t.line_list}; ${t.atmosphere.split(";")[0]}.`);
   parts.push(`Line-by-line at ${ORDER.map(b => B[b] ? B[b].step : "?").join(" / ")} nm, then convolved with the OCO-2 ILS (FWHM ${ORDER.map(b => B[b] ? B[b].ilsMeta.fwhm_nm.toFixed(3) : "—").join(" / ")} nm × ${state.ilsStretch.toFixed(2)}).`);
   parts.push(`Solar continuum TSIS-1 HSRS × Toon lines. Surface reflectance from the ECOSTRESS library.`);
-  parts.push(`Aerosol and Rayleigh are treated as pure extinction along the slant path — there is no scattering source term, so dimming is overestimated and this is not a substitute for a real radiative-transfer solve.`);
+  parts.push(state.scatter
+    ? `Aerosol and Rayleigh are mixed into one two-stream layer (delta-Eddington scaled, Meador & Weaver 1980 beam solution) coupled to the Lambertian surface: L = (E₀cosSZA/π)[R·exp(−m·f·τ_gas) + T·a·T_diff·exp(−m·τ_gas)/(1−a·s)]. The first term crosses only the gas above the layer, which is how aerosol biases retrieved XCO₂. Validated against a Monte Carlo reference to <0.009 in system albedo. Still approximate: one homogeneous layer, path radiance treated as isotropic (no phase-function angular dependence), and the diffuse surface path uses the direct-beam gas slant path.`
+    : `⚠ scattering is OFF: aerosol and Rayleigh are pure extinction, exp(−mτ), which ignores that scattered photons still reach the surface and return. This overestimates dimming badly — 10.2 % vs 0.35 % in the A-band at AOD 0.07.`);
   if (state.noise) parts.push(`Noise is a deterministic display effect, σ = continuum/SNR, hashed on sample index.`);
   if (state.obs && SND) parts.push(`Sounding ${SND.meta.sounding_id} (${SND.meta.surface}, ${SND.meta.time_utc.slice(0,10)}), shown ×${(1/(SND.meta.polarization_factor||0.5)).toFixed(0)} because OCO-2 measures a single linear polarization. L2 XCO₂ ${SND.meta.xco2_l2_ppm.toFixed(2)} ± ${SND.meta.xco2_uncertainty_ppm.toFixed(2)} ppm, AOD ${SND.meta.aod_total_l2.toFixed(3)}.`);
   note.innerHTML = parts.join(" ");
+
+  document.getElementById("ack").innerHTML =
+    'Built on the original <a href="https://rsfralab.github.io/oco/widgets/spectra-explorer.html" '
+    + 'style="color:inherit">OCO-2 Spectra Explorer</a> created by <b>Christian Frankenberg</b> '
+    + '(Caltech/JPL), whose widget and pre-computed line-by-line data this extends. '
+    + 'Spectroscopy ABSCO v5.2 (JPL/AER) · solar TSIS-1 HSRS (Coddington et al. 2021) × Toon '
+    + 'line list · surface reflectance ECOSTRESS Spectral Library 1.0 (Meerdink et al. 2019) · '
+    + 'sounding from OCO-2 L1b/L2 (NASA GES DISC) · Rayleigh from Bodhaine et al. (1999).';
 
   const sh = document.getElementById("sndHint");
   sh.innerHTML = SND
@@ -981,13 +1098,11 @@ function wireControls(){
     Object.assign(state, {
       xco2:M.xco2_l2_ppm, sza:M.sza, vza:M.vza, psurf:M.surface_pressure_hpa,
       surface:"l2", spectralAlbedo:false, albScale:1, albSlope:0,
-      // Deliberately NOT loading aod_total_l2 and NOT enabling Rayleigh. The L2
-      // albedo was retrieved with a full multiple-scattering model, in which
-      // aerosol does not simply attenuate the beam; adding it here as pure
-      // extinction double-counts the loss and drove the A-band 7.7 W m-2 um-1
-      // sr-1 too dark (rms 3.9 -> 11.0). Raise the aerosol slider yourself to
-      // see the effect -- just don't expect it to improve the fit.
-      aod:0, angstrom:1, rayleigh:false, h2o:1,
+      // The L2 aerosol IS loaded, but only because scattering is now two-stream:
+      // as pure extinction it drove the A-band 3x worse (rms 3.9 -> 11.5). The
+      // layer height is not in the L2 file, so 800 hPa is just a default.
+      aod:M.aod_total_l2, angstrom:1, rayleigh:true, scatter:true,
+      ssa:0.95, asym:0.65, aerP:800, h2o:1,
       ilsStretch:1, shiftNm:0, obs:true,
     });
     draw();
@@ -1228,6 +1343,11 @@ async function selftest(){
         ["ILS 0.1x",     { ilsStretch:0.1 }],
         ["ILS 3x",       { ilsStretch:3 }],
         ["ILS 0.1x zoom",{ ilsStretch:0.1 }],
+        ["xco2=800",     { xco2:800 }],
+        ["h2o=10x",      { h2o:10 }],
+        ["extinct only", { aod:0.4, rayleigh:true, scatter:false }],
+        ["thick high aer",{ aod:1.5, rayleigh:true, scatter:true, ssa:0.99, aerP:200 }],
+        ["absorbing aer", { aod:0.8, rayleigh:true, scatter:true, ssa:0.5, asym:0.1 }],
       ]){
     try {
       state = Object.assign(JSON.parse(JSON.stringify(saved)),
