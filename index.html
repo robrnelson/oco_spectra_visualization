@@ -69,6 +69,27 @@
   .banner{display:none;margin:0;padding:8px 14px;font:12px ui-monospace,Menlo,monospace;border-bottom:1px solid var(--hairline)}
   .banner.ok{display:block;background:rgba(46,139,87,.12);color:var(--text)}
   .banner.bad{display:block;background:rgba(201,42,90,.14);color:var(--text)}
+  /* docs overlay */
+  .modal[hidden]{display:none}
+  .modal{position:fixed;inset:0;z-index:50;display:flex;align-items:center;justify-content:center;padding:24px}
+  .modal-bg{position:absolute;inset:0;background:rgba(8,12,16,.55)}
+  .modal-box{position:relative;background:var(--panel);border:1px solid var(--hairline);border-radius:10px;max-width:920px;width:100%;max-height:90vh;display:flex;flex-direction:column;box-shadow:0 12px 48px rgba(0,0,0,.3)}
+  .modal-head{display:flex;align-items:center;gap:12px;padding:12px 18px;border-bottom:1px solid var(--hairline);flex:0 0 auto}
+  .modal-head h2{font-size:15px;font-weight:600}
+  .modal-body{overflow-y:auto;padding:4px 18px 22px;font-size:13px;line-height:1.55}
+  .modal-body h3{font-size:13px;margin:18px 0 6px;color:var(--text);letter-spacing:.01em}
+  .modal-body h3:first-child{margin-top:12px}
+  .modal-body p{margin:6px 0;color:var(--muted)}
+  .modal-body b{color:var(--text)}
+  .modal-body ul{margin:6px 0 6px 20px;color:var(--muted)}
+  .modal-body li{margin:3px 0}
+  .modal-body pre{background:var(--sunk);border:1px solid var(--hairline);border-radius:6px;padding:9px 11px;margin:8px 0;overflow-x:auto;font:11px/1.6 ui-monospace,Menlo,monospace;color:var(--text)}
+  .modal-body table{border-collapse:collapse;width:100%;margin:8px 0;font-size:12px}
+  .modal-body th,.modal-body td{border:1px solid var(--hairline);padding:4px 7px;text-align:left;vertical-align:top;color:var(--muted)}
+  .modal-body th{color:var(--text);font-weight:600;background:var(--sunk)}
+  .modal-body a{color:var(--accent)}
+  .modal-body .refs{font-size:12px}
+  .modal-body .refs li{margin:5px 0}
   @media (max-width:900px){.main{grid-template-columns:1fr}aside{border-right:0;border-bottom:1px solid var(--hairline);max-height:44vh}}
 </style>
 </head>
@@ -81,6 +102,7 @@
     <div class="sep"></div>
     <div class="tabs" id="focusTabs"></div>
     <div class="grow"></div>
+    <button class="btn" id="docsBtn" title="Full description of the model, equations and citations">docs</button>
     <button class="btn" id="snapBtn" title="Freeze the current curves as a dimmed reference to compare against">snapshot</button>
     <button class="btn" id="linkBtn" title="Copy a URL that restores this exact state">link</button>
     <button class="btn" id="csvBtn" title="Download the displayed curves as CSV">CSV ↓</button>
@@ -122,7 +144,7 @@
           <input type="range" id="ssa" min="0.5" max="1" step="0.005"></div>
         <div class="ctl"><label>asymmetry g <output id="o_asym"></output></label>
           <input type="range" id="asym" min="0" max="0.9" step="0.01"></div>
-        <div class="ctl"><label>aerosol layer <output id="o_aerP"></output></label>
+        <div class="ctl"><label>aerosol layer (ALH) <output id="o_aerP"></output></label>
           <input type="range" id="aerP" min="50" max="1030" step="5"></div>
         <div class="toggles">
           <button class="chip" id="scatter">two-stream scattering</button>
@@ -190,6 +212,7 @@
       <span>airmass <b id="r_m">—</b></span>
       <span>band albedo <b id="r_a">—</b></span>
       <span>continuum <b id="r_c">—</b></span>
+      <span id="r_sortWrap" style="display:none">sorted mean radiance — continuum <b id="r_sortC">—</b> · intermediate <b id="r_sortM">—</b></span>
       <span id="r_fitWrap" style="display:none">rms residual <b id="r_fit">—</b></span>
       <span>redraw <b id="r_ms">—</b></span>
     </div>
@@ -197,6 +220,192 @@
     <p class="note" id="note"></p>
     <p class="note" id="ack"></p>
   </footer>
+</div>
+
+<div class="modal" id="docs" hidden>
+  <div class="modal-bg" id="docsBg"></div>
+  <div class="modal-box">
+    <div class="modal-head">
+      <h2>OCO-2 Spectra Explorer — model, equations and sources</h2>
+      <span class="grow"></span>
+      <button class="btn" id="docsClose" title="Close (Esc)">close ✕</button>
+    </div>
+    <div class="modal-body">
+
+      <h3>What this is</h3>
+      <p>An interactive line-by-line forward model of the three OCO-2 bands: the
+      <b>O&#8322; A-band</b> (0.76&nbsp;&micro;m), the <b>weak CO&#8322;</b> band (1.61&nbsp;&micro;m) and the
+      <b>strong CO&#8322;</b> band (2.06&nbsp;&micro;m). Sunlight crosses the atmosphere twice before
+      reaching the satellite. In the A-band the absorber amount is known, so the band measures the
+      light <i>path</i> &mdash; surface pressure, aerosol, cloud. The two CO&#8322; bands then reveal how
+      much CO&#8322; that same path crossed.</p>
+      <p>It is an extended rewrite of the original
+      <a href="https://rsfralab.github.io/oco/widgets/spectra-explorer.html" target="_blank"
+      rel="noopener">OCO-2 Spectra Explorer</a> created by <b>Christian Frankenberg</b> (Caltech/JPL),
+      and reads the same pre-computed line-by-line data produced for it.</p>
+
+      <h3>Inputs</h3>
+      <table>
+        <tr><th>Quantity</th><th>Source</th></tr>
+        <tr><td>&tau; per absorber (CO&#8322;, O&#8322;, H&#8322;O), vertical, airmass 1, at 1013.25&nbsp;hPa</td>
+            <td>ABSCO v5.2 (JPL/AER tables, incl. line mixing and continua) on a US Standard
+            Atmosphere 1976 profile, 60 layers, H&#8322;O at 50&nbsp;% RH in the troposphere
+            (column 15.7&nbsp;kg&nbsp;m&#8315;&sup2;), XCO&#8322; reference 420&nbsp;ppm dry, O&#8322; 0.20946</td></tr>
+        <tr><td>Solar irradiance E&#8320; at 1&nbsp;AU, unconvolved</td>
+            <td>TSIS-1 Hybrid Solar Reference Spectrum continuum &times; G.&nbsp;Toon disk-integrated
+            solar line transmittance</td></tr>
+        <tr><td>Instrument line shape, per band</td>
+            <td>OCO-2 L1b ILS, footprint 4 (FWHM 0.0415 / 0.0774 / 0.1012&nbsp;nm)</td></tr>
+        <tr><td>Surface reflectance, 400&ndash;2200&nbsp;nm at 5&nbsp;nm</td>
+            <td>ECOSTRESS Spectral Library 1.0 (JHU Becknic, UCSB ASD)</td></tr>
+        <tr><td>Example sounding + L2 retrieval</td>
+            <td>OCO-2 L1b/L2, sounding 2024080120532372, Railroad Valley playa, Nevada,
+            2024-08-01, nadir</td></tr>
+      </table>
+
+      <h3>Forward model</h3>
+      <pre>&tau;_gas = psurf/P&#8320; &middot; (XCO&#8322;/420 &middot; &tau;_co2 + &tau;_o2) + h2o &middot; &tau;_h2o
+&tau;_ray = 0.008569 &micro;m&#8315;&#8308; (1 + 0.0113 &micro;m&#8315;&sup2; + 0.00013 &micro;m&#8315;&#8308;) &middot; psurf/P&#8320;
+&tau;_aer = AOD&#8325;&#8325;&#8320; &middot; (&lambda;/550)^(&minus;&aring;)
+m      = 1/cos(SZA) + 1/cos(VZA)
+a(&lambda;)   = albScale &middot; ECOSTRESS(&lambda;) + albSlope &middot; (&nu; &minus; &nu;_centre),   &nu; = 10&#8311;/&lambda; cm&#8315;&sup1;
+
+L   = (E&#8320; cosSZA / &pi;) [ R &middot; exp(&minus;m&middot;f&middot;&tau;_gas) + T&middot;a&middot;T_diff &middot; exp(&minus;m&middot;&tau;_gas) / (1 &minus; a&middot;s) ]
+L_c = (E&#8320; cosSZA / &pi;) [ R                  + T&middot;a&middot;T_diff                   / (1 &minus; a&middot;s) ]</pre>
+      <p>P&#8320; = 1013.25&nbsp;hPa. <b>&tau;_h2o is deliberately not scaled by surface pressure</b> &mdash; it is a
+      fixed tropospheric column in the data, which says to scale only &tau;_co2 and &tau;_o2. The H&#8322;O
+      slider is a separate column scale factor, so at psurf&nbsp;=&nbsp;0 you must also zero H&#8322;O to reach a
+      true vacuum.</p>
+
+      <h3>Scattering</h3>
+      <p>Aerosol and Rayleigh are mixed into <b>one two-stream layer coupled to the Lambertian
+      surface</b>, not treated as pure extinction. The distinction is large: photons taken out of the
+      direct beam are not lost, they still reach the ground diffusely and still come back up. At the
+      bundled sounding&rsquo;s AOD of 0.071, pure extinction dims the A-band <b>10.2&nbsp;%</b>; this
+      treatment dims it <b>0.35&nbsp;%</b>.</p>
+      <ul>
+        <li>Optical properties mix by the standard &tau;-weighted rule: &tau; adds, and &omega;&#8320; and g are
+        &tau;-weighted between Rayleigh (&omega;&#8320;&nbsp;=&nbsp;1, g&nbsp;=&nbsp;0) and aerosol.</li>
+        <li><b>R</b>, <b>T</b> come from <b>delta-Eddington</b> scaling
+        (&tau;* = (1&minus;&omega;g&sup2;)&tau;, &omega;* = &omega;(1&minus;g&sup2;)/(1&minus;&omega;g&sup2;), g* = g/(1+g))
+        with the Meador &amp; Weaver (1980) Eddington-closure <i>collimated beam</i> solution.
+        <b>s</b> (spherical albedo) and <b>T_diff</b> come from the classical two-stream forms for
+        diffuse illumination, used for the upward path off the surface.</li>
+        <li><b>f</b> is the fraction of the well-mixed gas column <i>above</i> the layer, set by the
+        layer pressure: f = p_layer/psurf. The atmospheric-scatter term crosses only that much gas.
+        Rayleigh scattering is distributed &prop; pressure, so its mean scattering level sits at
+        psurf/2, i.e. f&nbsp;=&nbsp;0.5.</li>
+        <li>Accuracy is <b>measured, not asserted</b>: <code>validate_scattering.py</code> compares the
+        system albedo against an independent Monte Carlo solution (Henyey&ndash;Greenstein phase
+        function, Lambertian surface, collimated beam) over the full slider range. Worst absolute
+        error <b>0.010</b>; 0.6&nbsp;% for the actual sounding case.</li>
+      </ul>
+      <p>Turn <b>two-stream scattering</b> off to recover extinction-only and see the difference.</p>
+
+      <h3>Instrument line shape</h3>
+      <p>The radiance is formed at line-by-line resolution and then convolved with the real OCO-2
+      ILS, evaluated as an edge-normalised correlation. Two things worth recording:</p>
+      <ul>
+        <li>The kernel is placed using the tabulated <code>delta_lambda_nm</code>, i.e. index
+        <i>centre</i> sits at &Delta;&lambda;&nbsp;=&nbsp;0. The kernels are <b>not</b> centred on their array
+        midpoint: in the A-band the true centre is 0.0090&nbsp;nm away, <b>22&nbsp;% of that band&rsquo;s
+        FWHM</b>. Assuming the midpoint (as the original widget did) mis-registers the model and
+        inflates the A-band residual against the real sounding from <b>3.88 to 6.60</b>.</li>
+        <li>The convolution is evaluated only at the output positions rather than over the whole fine
+        grid. That is bit-identical (verified: max abs diff 0.000e+00) and much cheaper. Sampling
+        density follows the effective ILS width, so narrowing the ILS towards 0.1&times; resolves finer
+        lines instead of aliasing them.</li>
+      </ul>
+
+      <h3>Spectral sorting (the &ldquo;sorted&rdquo; view)</h3>
+      <p>Following <b>Zeng et&nbsp;al. (2018)</b>. The channels are sorted into ascending order of
+      <b>clear-sky</b> radiance &mdash; the same state with AOD&nbsp;=&nbsp;0 &mdash; and that one ordering is
+      then applied to every curve shown, so the scenes stay directly comparable. Strong, intermediate
+      and weak lines therefore appear on the left, middle and right of the curve.</p>
+      <pre>perm   = argsort( L_clear )          (ascending, AOD = 0, all else unchanged)
+x-axis = sorted channel index
+y-axis = radiance, reordered by perm</pre>
+      <p>The physical basis, in the paper&rsquo;s words: <i>&ldquo;atmospheric aerosols scatter photons back
+      to space and therefore reduce the chance of the photons being absorbed by the oxygen, which is
+      almost uniformly distributed in the atmosphere. Photons scattered by higher aerosol layers
+      undergo shorter absorption paths, thereby reducing the O&#8322; absorption depths.&rdquo;</i> That is
+      exactly the <b>f</b> factor above. Two pieces of information fall out:</p>
+      <ul>
+        <li><b>Continuum (right)</b> &mdash; O&#8322; absorption is weak, so radiance there tracks
+        <b>total AOD</b> directly, given a fixed surface albedo.</li>
+        <li><b>Intermediate lines (middle)</b> &mdash; these differ most between aerosol scenarios, so
+        their level constrains <b>aerosol layer height</b>. Raising the layer lifts this section.</li>
+        <li><b>Saturated cores (left)</b> &mdash; excluded in the paper&rsquo;s retrieval, because
+        saturation makes them measurement-noise dominated.</li>
+      </ul>
+      <p>The shaded bands mark these three regions. The thresholds used here are clear-sky
+      transmittance &lt;&nbsp;0.05, 0.05&ndash;0.80 and &ge;&nbsp;0.80; they are a display convention for this
+      tool, not the paper&rsquo;s exact retrieval windows (those are in its supporting information).
+      Note also that the paper works in the 1.27&nbsp;&micro;m O&#8322; band with a mountaintop FTS, and
+      reports reflectance; here the same construction is applied to the OCO-2 bands in radiance.</p>
+      <p>One structural difference: the small wiggles the paper sees in its sorted radiance come from
+      the O&#8322; absorption coefficients varying with pressure and temperature at different altitudes.
+      This tool has a single fixed vertical &tau; profile, so it cannot reproduce that effect.</p>
+
+      <h3>Approximations and limits</h3>
+      <ul>
+        <li><b>One homogeneous scattering layer</b>, not a profile. It is a two-stream approximation,
+        not a benchmark RT code.</li>
+        <li>The atmospheric path radiance is treated as <b>isotropic</b> &mdash; no phase-function
+        angular dependence &mdash; and the diffuse surface path is charged the direct-beam gas slant
+        path.</li>
+        <li><b>Spectral albedo is sampled at 5&nbsp;nm</b>: 5 points across the A-band, 10 across the
+        strong-CO&#8322; band. Enough for a continuum tilt, not fine structure.</li>
+        <li>The <b>albedo slope</b> control is global, while L2 reports one per band.
+        <code>albedo_slope_l2_per_wn</code> is <b>not</b> applied by &ldquo;load L2 state&rdquo;: its reference
+        wavenumber is not recorded in the data, and measured against the sounding it does not help
+        (the weak-CO&#8322; residual is already flat at 0.23&nbsp;% trend and degrades to 1.44&nbsp;% with it).</li>
+        <li><b>Noise is a display effect</b>, &sigma; = continuum/SNR, hashed deterministically on
+        sample index so the curve does not shimmer while other sliders move.</li>
+        <li>Residuals against the real sounding will <b>not</b> go to zero. L2 Full Physics carries a
+        multi-layer scattering atmosphere, retrieved aerosol types and profiles, temperature and water
+        profiles, per-footprint dispersion and ILS, and zero-level offsets. Loading a few of its
+        posterior values into a single-layer model with one Lambertian albedo per band cannot
+        reproduce its radiances; the residual is dominated by that structural gap.</li>
+      </ul>
+
+      <h3>Verification</h3>
+      <p>Add <code>?selftest=1</code> to the URL and this page will recompute its forward model at
+      fixed points and compare against a NumPy reference generated by <code>validate.py</code>,
+      reporting the worst relative deviation. It also renders every view &times; band &times; overlay
+      combination to check no code path throws. <code>validate_scattering.py</code> is the Monte Carlo
+      check of the scattering model. <code>selftest_headless.js</code> runs this page&rsquo;s real script
+      under <code>gjs</code> with a DOM shim, for CI without a browser.</p>
+
+      <h3>References</h3>
+      <ul class="refs">
+        <li>Frankenberg, C. <i>OCO-2 Spectra Explorer</i> (original widget and line-by-line data).
+        <a href="https://rsfralab.github.io/oco/widgets/spectra-explorer.html" target="_blank"
+        rel="noopener">rsfralab.github.io/oco</a></li>
+        <li>Zeng, Z.-C., Natraj, V., Xu, F., Pongetti, T.&nbsp;J., Shia, R.-L., Kort, E.&nbsp;A., Toon,
+        G.&nbsp;C., Sander, S.&nbsp;P., &amp; Yung, Y.&nbsp;L. (2018). Constraining aerosol vertical profile
+        in the boundary layer using hyperspectral measurements of oxygen absorption.
+        <i>Geophysical Research Letters</i>, 45(19), 10772&ndash;10780.
+        <a href="https://doi.org/10.1029/2018GL079286" target="_blank" rel="noopener">doi:10.1029/2018GL079286</a></li>
+        <li>Meador, W.&nbsp;E., &amp; Weaver, W.&nbsp;R. (1980). Two-stream approximations to radiative
+        transfer in planetary atmospheres. <i>Journal of the Atmospheric Sciences</i>, 37, 630&ndash;643.</li>
+        <li>Joseph, J.&nbsp;H., Wiscombe, W.&nbsp;J., &amp; Weinman, J.&nbsp;A. (1976). The delta-Eddington
+        approximation for radiative flux transfer. <i>Journal of the Atmospheric Sciences</i>, 33,
+        2452&ndash;2459.</li>
+        <li>Bodhaine, B.&nbsp;A., Wood, N.&nbsp;B., Dutton, E.&nbsp;G., &amp; Slusser, J.&nbsp;R. (1999). On
+        Rayleigh optical depth calculations. <i>Journal of Atmospheric and Oceanic Technology</i>, 16,
+        1854&ndash;1861.</li>
+        <li>Coddington, O.&nbsp;M., Richard, E.&nbsp;C., Harber, D., et&nbsp;al. (2021). The TSIS-1 Hybrid
+        Solar Reference Spectrum. <i>Geophysical Research Letters</i>, 48, e2020GL091709.</li>
+        <li>Meerdink, S.&nbsp;K., Hook, S.&nbsp;J., Roberts, D.&nbsp;A., &amp; Abbott, E.&nbsp;A. (2019). The
+        ECOSTRESS spectral library version 1.0. <i>Remote Sensing of Environment</i>, 230, 111196.</li>
+        <li>Payne, V.&nbsp;H., et&nbsp;al. ABSCO absorption coefficient tables (JPL/AER), v5.2, as used by
+        the OCO-2 L2 algorithm.</li>
+        <li>OCO-2 Level 1B and Level 2 data products, NASA GES DISC.</li>
+      </ul>
+
+    </div>
+  </div>
 </div>
 
 <script>
@@ -229,7 +438,12 @@ const BANDS = {
 const SURF_NAMES = { dry_grass:"dry grass", desert:"desert", conifer:"conifer forest",
                      snow:"snow", ocean:"water (no glint)", l2:"L2 retrieved" };
 const VIEWS = { radiance:"radiance", transmittance:"transmittance", od:"optical depth",
-                absorbers:"absorbers" };
+                absorbers:"absorbers", sorted:"sorted" };
+/* Sorted view (Zeng et al. 2018): channels ordered by ascending CLEAR-SKY radiance,
+   the same ordering applied to every curve. Strong / intermediate / weak lines land
+   left / middle / right. Region cuts are on clear-sky transmittance -- a display
+   convention here, not the paper's exact retrieval windows. */
+const SORT_SAT = 0.05, SORT_CONT = 0.80;
 const ABSORBERS = [["co2","CO₂","--co2"],["o2","O₂","--o2"],["h2o","H₂O","--h2o"],
                    ["ray","Rayleigh","--ray"],["aer","aerosol","--aer"]];
 
@@ -269,6 +483,7 @@ const SLIDERS = ["sza","vza","xco2","psurf","h2o","aod","angstrom","ssa","asym",
 
 let state = defaults();
 let zoom = { aband:null, wco2:null, sco2:null };   // [lo,hi] nm per band
+let szoom = { aband:null, wco2:null, sco2:null };  // [i0,i1] sorted-channel index
 let snapshot = null;                               // frozen state for the ghost curve
 
 /* ---- data loading --------------------------------------------------- */
@@ -562,6 +777,13 @@ function absorberCurves(band, st, idx){
   return out;
 }
 
+/* US Standard Atmosphere 1976 pressure -> geometric altitude, km. Lets the aerosol
+   layer slider be read as an ALH, which is how Zeng et al. (2018) report it. */
+function pToZ(p){
+  if (p >= 226.32) return (288.15 / 0.0065) * (1 - Math.pow(p / 1013.25, 0.190263)) / 1000;
+  return 11 + 6.3416 * Math.log(226.32 / Math.max(p, 1e-3));
+}
+
 /* deterministic noise: hashed on sample index so the curve does not shimmer */
 function gauss(i, seed){
   let a = (i * 0x9E3779B1 + seed * 0x85EBCA77) | 0;
@@ -631,6 +853,27 @@ function computeBand(band, st, pxWidth){
   const o = { idx, wl, L:Ln, Lraw:L, Lc, m, contMax,
               albMid:albedoAt(band, st, 0.5 * (wl[0] + wl[wl.length-1])) };
   if (st.view === "absorbers") o.abs = absorberCurves(band, st, idx);
+  if (st.view === "sorted"){
+    // clear sky = same state with the aerosol removed (Rayleigh left alone, as in
+    // any real clear-sky calculation). Sort ascending by its radiance.
+    const clear = modelAt(band, Object.assign({}, st, { aod:0 }), idx);
+    const N = idx.length;
+    const perm = new Int32Array(N);
+    for (let j = 0; j < N; j++) perm[j] = j;
+    const key = clear.L;
+    Array.prototype.sort.call(perm, (p, q) => key[p] - key[q]);
+    o.sortPerm = perm; o.L0 = clear.L; o.Lc0 = clear.Lc;
+    // clear-sky transmittance drives the region shading and the region readouts
+    let sumC = 0, nC = 0, sumM = 0, nM = 0;
+    for (let j = 0; j < N; j++){
+      const t = clear.Lc[j] > 0 ? clear.L[j] / clear.Lc[j] : 0;
+      if (t >= SORT_CONT){ sumC += Ln[j]; nC++; }
+      else if (t >= SORT_SAT){ sumM += Ln[j]; nM++; }
+    }
+    o.contMean = nC ? sumC / nC : NaN;
+    o.midMean = nM ? sumM / nM : NaN;
+    o.nSat = N - nC - nM;
+  }
   return o;
 }
 function albedoAt(band, st, lam){
@@ -655,6 +898,8 @@ function yAxis(band, view){
     case "transmittance": return { min:0, max:1.05, log:false, unit:"" };
     case "od":            return { min:1e-3, max:1e2, log:true, unit:"" };
     case "absorbers":     return { min:1e-4, max:1e2, log:true, unit:"" };
+    case "sorted":        return { min:0, max:BANDS[band].ymax, log:false,
+                                   unit:"W m⁻² µm⁻¹ sr⁻¹" };
     default:              return { min:0, max:BANDS[band].ymax, log:false,
                                    unit:"W m⁻² µm⁻¹ sr⁻¹" };
   }
@@ -722,7 +967,13 @@ function render(ctx, W, H, scale){
   shown.forEach((band, ib) => {
     const c = cur[band]; if (!c) return;
     const bm = BANDS[band], view = state.view, ax = yAxis(band, view);
-    const [x0, x1] = visibleRange(band);
+    const srt = view === "sorted" && c.sortPerm ? c.sortPerm : null;
+    // sorted mode: the x axis is the sorted channel index, with its own zoom
+    const [x0, x1] = srt
+      ? (szoom[band] || [0, srt.length - 1])
+      : visibleRange(band);
+    const A = srt ? (j => srt[j]) : (j => j);        // sample -> array index
+    const X_OF = srt ? (j => j) : (j => c.wl[j]);    // sample -> x value
     const top = ib * (blockH + GAP), bot = top + PH;
     const px = x => PADL + (x - x0) / (x1 - x0) * (W - PADL - PADR);
     const py = v => {
@@ -732,7 +983,7 @@ function render(ctx, W, H, scale){
       }
       return top + PADT + (1 - (v - ax.min) / (ax.max - ax.min)) * (PH - PADT - PADB);
     };
-    geom.push({ band, top, bot, PH, px, py, x0, x1, ax });
+    geom.push({ band, top, bot, PH, px, py, x0, x1, ax, sorted: !!srt });
 
     // grid + axes
     ctx.strokeStyle = C.hair; ctx.fillStyle = C.faint; ctx.lineWidth = 1;
@@ -747,10 +998,13 @@ function render(ctx, W, H, scale){
       const X = px(t);
       ctx.textBaseline = "top";
       ctx.textAlign = X > W - PADR - 18 ? "right" : (X < PADL + 18 ? "left" : "center");
-      ctx.fillText(t.toFixed(x1 - x0 < 2 ? 2 : (x1 - x0 < 20 ? 1 : 0)), X, bot - PADB + 5);
+      ctx.fillText(srt ? t.toFixed(0)
+                       : t.toFixed(x1 - x0 < 2 ? 2 : (x1 - x0 < 20 ? 1 : 0)),
+                   X, bot - PADB + 5);
     }
     ctx.fillStyle = C.muted; ctx.textAlign = "left"; ctx.textBaseline = "top";
-    ctx.fillText(`${bm.label} · ${bm.um} · nm`, PADL + 6, top + 2);
+    ctx.fillText(`${bm.label} · ${bm.um} · `
+      + (srt ? "channel sorted by clear-sky radiance" : "nm"), PADL + 6, top + 2);
     if (ib === 0){
       ctx.textAlign = "right";
       ctx.fillText(VIEWS[view] + (ax.unit ? "  " + ax.unit : ""), W - PADR, top + 2);
@@ -764,13 +1018,49 @@ function render(ctx, W, H, scale){
       for (let j = 0; j < N; j++){
         const v = getY(j);
         if (!isFinite(v)){ pen = false; continue; }
-        const X = px(c.wl[j]), Y = py(Math.min(Math.max(v, ax.min), ax.max));
+        const X = px(X_OF(j)), Y = py(Math.min(Math.max(v, ax.min), ax.max));
         pen ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y); pen = true;
       }
       ctx.stroke(); ctx.setLineDash([]);
     };
 
-    if (view === "absorbers"){
+    if (view === "sorted"){
+      // shade the three regions the method distinguishes, by clear-sky transmittance
+      const bandsOf = [];
+      let run = null;
+      for (let j = 0; j < N; j++){
+        const k = A(j);
+        const t = c.Lc0[k] > 0 ? c.L0[k] / c.Lc0[k] : 0;
+        const kind = t >= SORT_CONT ? 2 : (t >= SORT_SAT ? 1 : 0);
+        if (!run || run.kind !== kind){ run = { kind, j0:j, j1:j }; bandsOf.push(run); }
+        else run.j1 = j;
+      }
+      const shade = ["rgba(201,42,90,0.07)", "rgba(31,111,178,0.07)", "rgba(46,139,87,0.07)"];
+      for (const r of bandsOf){
+        if (r.j1 < x0 || r.j0 > x1) continue;
+        const xa = px(Math.max(r.j0, x0)), xb = px(Math.min(r.j1, x1));
+        ctx.fillStyle = shade[r.kind];
+        ctx.fillRect(xa, top + PADT, Math.max(1, xb - xa), PH - PADT - PADB);
+      }
+      // clear-sky reference, then ghost, then the current model
+      line(j => c.L0[A(j)], C.cont, 1.2, [5, 4]);
+      const g = ghost[band];
+      if (g && g.L.length === N) line(j => g.L[A(j)], C.ghost, 1.1, [2, 3]);
+      line(j => c.L[A(j)], C.model, 1.3);
+      // region labels, once, on the top panel
+      if (ib === 0){
+        ctx.fillStyle = C.faint; ctx.textBaseline = "top";
+        const lab = [["saturated (excluded)", 0], ["intermediate → ALH", 1], ["continuum → AOD", 2]];
+        for (const [txt, kind] of lab){
+          const r = bandsOf.filter(q => q.kind === kind)
+                           .sort((p, q) => (q.j1 - q.j0) - (p.j1 - p.j0))[0];
+          if (!r) continue;
+          const mid = Math.min(Math.max((r.j0 + r.j1) / 2, x0), x1);
+          ctx.textAlign = "center";
+          ctx.fillText(txt, px(mid), top + PADT + 2);
+        }
+      }
+    } else if (view === "absorbers"){
       for (const [key] of ABSORBERS){
         const T = c.abs[key];
         // an absent absorber gives T = 1 exactly; drop it rather than pinning it
@@ -791,9 +1081,9 @@ function render(ctx, W, H, scale){
       // model, with a light fill in radiance view
       if (view === "radiance"){
         ctx.fillStyle = C.modelFill; ctx.beginPath();
-        ctx.moveTo(px(c.wl[0]), py(ax.min));
-        for (let j = 0; j < N; j++) ctx.lineTo(px(c.wl[j]), py(Math.min(c.L[j], ax.max)));
-        ctx.lineTo(px(c.wl[N-1]), py(ax.min)); ctx.closePath(); ctx.fill();
+        ctx.moveTo(px(X_OF(0)), py(ax.min));
+        for (let j = 0; j < N; j++) ctx.lineTo(px(X_OF(j)), py(Math.min(c.L[j], ax.max)));
+        ctx.lineTo(px(X_OF(N-1)), py(ax.min)); ctx.closePath(); ctx.fill();
       }
       line(j => yOf(c, j, view), C.model, 1.1);
     }
@@ -805,7 +1095,7 @@ function render(ctx, W, H, scale){
     ctx.fillStyle = C.faint; ctx.textAlign = "right"; ctx.textBaseline = "middle";
     ctx.fillText("resid.", PADL - 7, rmid);
 
-    if (state.obs && SND && view !== "absorbers"){
+    if (state.obs && SND && view !== "absorbers" && view !== "sorted"){
       const sd = SND[band], pf = SND.meta.polarization_factor || 0.5;
       const swl = sd.wl, srad = sd.radiance, sgood = sd.good;
       const obsY = i => {
@@ -859,6 +1149,20 @@ function render(ctx, W, H, scale){
       ctx.strokeStyle = C.faint; ctx.setLineDash([3, 3]); ctx.beginPath();
       ctx.moveTo(hoverX, top + PADT); ctx.lineTo(hoverX, bot - PADB); ctx.stroke();
       ctx.setLineDash([]);
+      if (srt){
+        const j = Math.max(0, Math.min(N - 1, Math.round(xw))), k = A(j);
+        const t0 = c.Lc0[k] > 0 ? c.L0[k] / c.Lc0[k] : 0;
+        const region = t0 >= SORT_CONT ? "continuum" : (t0 >= SORT_SAT ? "intermediate" : "saturated");
+        ctx.beginPath();
+        ctx.arc(px(j), py(Math.min(Math.max(c.L[k], ax.min), ax.max)), 3.2, 0, 2 * Math.PI);
+        ctx.fillStyle = C.model; ctx.fill();
+        ctx.lineWidth = 1.4; ctx.strokeStyle = C.panel; ctx.stroke();
+        hoverTxt = (hoverTxt ? hoverTxt + "\n" : "")
+          + `${bm.short}  ch ${j}/${N - 1}  ${c.wl[k].toFixed(3)} nm  ${region}`
+          + `\n   model ${c.L[k].toFixed(2)}   clear ${c.L0[k].toFixed(2)}`
+          + `   clear-sky T ${t0.toFixed(4)}`;
+        return;
+      }
       let txt = `${bm.short}  ${xw.toFixed(3)} nm`;
       if (view === "absorbers"){
         for (const [key, lbl] of ABSORBERS){
@@ -946,6 +1250,14 @@ function readouts(){
   g("r_c").textContent = ORDER.map(b => cur[b] ? cur[b].contMax.toFixed(1) : "—").join(" / ")
     + "  W m⁻² µm⁻¹ sr⁻¹";
   g("r_fitWrap").style.display = state.obs && SND ? "" : "none";
+  const sortOn = state.view === "sorted";
+  g("r_sortWrap").style.display = sortOn ? "" : "none";
+  if (sortOn){
+    const f = k => ORDER.map(b => cur[b] && isFinite(cur[b][k])
+      ? cur[b][k].toFixed(2) : "—").join(" / ");
+    g("r_sortC").textContent = f("contMean");
+    g("r_sortM").textContent = f("midMean");
+  }
   g("r_ms").textContent = lastMs.toFixed(1) + " ms  (" + panelsShown().length + " panel"
     + (panelsShown().length > 1 ? "s" : "") + (snapshot ? ", +ghost" : "") + ")";
 
@@ -962,8 +1274,8 @@ function readouts(){
   g("o_angstrom").textContent = state.angstrom.toFixed(2);
   g("o_ssa").textContent = state.ssa.toFixed(3);
   g("o_asym").textContent = state.asym.toFixed(2);
-  g("o_aerP").textContent = state.aerP.toFixed(0) + " hPa"
-    + (state.aod > 0 ? "  (f=" + Math.max(0, Math.min(1, state.aerP/Math.max(state.psurf,1e-9))).toFixed(2) + ")" : "");
+  g("o_aerP").textContent = state.aerP.toFixed(0) + " hPa ≈ " + pToZ(state.aerP).toFixed(1) + " km"
+    + (state.aod > 0 ? "  f=" + Math.max(0, Math.min(1, state.aerP/Math.max(state.psurf,1e-9))).toFixed(2) : "");
   g("o_albScale").textContent = state.albScale.toFixed(2) + " ×";
   g("o_albSlope").textContent = state.albSlope.toExponential(1) + " /cm⁻¹";
   g("o_ilsStretch").textContent = state.ilsStretch.toFixed(2) + " × FWHM";
@@ -985,7 +1297,11 @@ function readouts(){
 function buildLegend(){
   const box = document.getElementById("legend");
   const items = [];
-  if (state.view === "absorbers"){
+  if (state.view === "sorted"){
+    items.push([C.cont, "clear sky (AOD = 0)", "dashed"]);
+    items.push([C.model, "current scene", "solid"]);
+    if (snapshot) items.push([C.ghost, "snapshot", "dashed"]);
+  } else if (state.view === "absorbers"){
     for (const [key, lbl] of ABSORBERS) items.push([C[key], lbl, "solid"]);
   } else {
     if (state.view === "radiance") items.push([C.cont, "no absorption", "dashed"]);
@@ -996,19 +1312,30 @@ function buildLegend(){
   }
   box.innerHTML = items.map(([c, l, s]) =>
     `<span><i style="border-color:${c};border-top-style:${s}"></i>${l}</span>`).join("")
-    + `<span style="margin-left:auto;color:var(--faint)">drag to zoom · shift-drag to pan · double-click to reset</span>`;
+    + `<span style="margin-left:auto;color:var(--faint)">`
+    + (state.view === "sorted"
+        ? "channels sorted by clear-sky radiance (Zeng et al. 2018) · drag to zoom the sorted axis"
+        : "drag to zoom · shift-drag to pan · double-click to reset")
+    + `</span>`;
 }
 
 function buildZooms(){
   const box = document.getElementById("zooms");
-  const on = ORDER.filter(b => zoom[b]);
   box.innerHTML = "";
-  for (const b of on){
+  for (const b of ORDER.filter(x => zoom[x])){
     const [lo, hi] = zoom[b];
     const el = document.createElement("button");
     el.className = "chip on";
     el.textContent = `${BANDS[b].short} ${lo.toFixed(2)}–${hi.toFixed(2)} nm ✕`;
     el.onclick = () => { zoom[b] = null; draw(); };
+    box.appendChild(el);
+  }
+  if (state.view === "sorted") for (const b of ORDER.filter(x => szoom[x])){
+    const [lo, hi] = szoom[b];
+    const el = document.createElement("button");
+    el.className = "chip on";
+    el.textContent = `${BANDS[b].short} ch ${lo}–${hi} ✕`;
+    el.onclick = () => { szoom[b] = null; draw(); };
     box.appendChild(el);
   }
 }
@@ -1021,6 +1348,7 @@ function captions(){
     transmittance: ` <b>Transmittance</b> L/L<sub>c</sub> removes the continuum, so absorption depth is directly comparable across the three bands.`,
     od: ` <b>Optical depth</b> −ln(L/L<sub>c</sub>) as the instrument sees it, after the ILS — deep lines saturate and flatten.`,
     absorbers: ` <b>Absorbers</b> splits the apparent optical depth per species: O₂ owns the A-band, CO₂ the other two, and H₂O contaminates the strong-CO₂ band most.`,
+    sorted: ` <b>Sorted</b> follows the spectral sorting method of Zeng et al. (2018): channels are ordered by ascending <i>clear-sky</i> radiance (the same scene with AOD = 0), and that one ordering is applied to every curve. Saturated line cores land on the left, intermediate lines in the middle, continuum on the right. The <b>continuum</b> level tracks total <b>AOD</b>; the <b>intermediate</b> lines respond to <b>aerosol layer height</b>, because photons scattered by a higher layer traverse less O₂ before returning to space. Raise AOD and the whole curve lifts; raise the aerosol layer and the middle section lifts while the continuum barely moves; change albedo and the continuum moves but the line-to-continuum contrast does not. Open <b>docs</b> for the equations and the citation.`,
   }[state.view] || "";
   cap.innerHTML = base + extra;
 
@@ -1111,10 +1439,12 @@ function wireControls(){
     const keep = { view:state.view, focus:state.focus };
     state = Object.assign(defaults(), keep);
     zoom = { aband:null, wco2:null, sco2:null };
+    szoom = { aband:null, wco2:null, sco2:null };
     draw();
   };
   document.getElementById("clearZoom").onclick = () => {
-    zoom = { aband:null, wco2:null, sco2:null }; draw();
+    zoom = { aband:null, wco2:null, sco2:null };
+    szoom = { aband:null, wco2:null, sco2:null }; draw();
   };
   document.getElementById("snapBtn").onclick = () => {
     snapshot = JSON.parse(JSON.stringify(state)); draw();
@@ -1122,6 +1452,12 @@ function wireControls(){
   document.getElementById("clearSnap").onclick = () => { snapshot = null; draw(); };
   document.getElementById("themeBtn").onclick = () =>
     setTheme(document.documentElement.getAttribute("data-theme") !== "dark");
+  const docs = document.getElementById("docs");
+  const showDocs = on => { docs.hidden = !on; };
+  document.getElementById("docsBtn").onclick = () => showDocs(true);
+  document.getElementById("docsClose").onclick = () => showDocs(false);
+  document.getElementById("docsBg").onclick = () => showDocs(false);
+  window.addEventListener("keydown", e => { if (e.key === "Escape") showDocs(false); });
   document.getElementById("linkBtn").onclick = copyLink;
   document.getElementById("csvBtn").onclick = exportCSV;
   document.getElementById("pngBtn").onclick = exportPNG;
@@ -1143,9 +1479,10 @@ cv.addEventListener("pointerdown", e => {
   const r = cv.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
   const g = bandAt(y); if (!g) return;
   // panning only means something once zoomed in; otherwise treat it as a brush
-  const mode = e.shiftKey && zoom[g.band] ? "pan" : "brush";
-  drag = { band:g.band, x0:x, x1:x, mode,
-           z0:zoom[g.band] ? zoom[g.band].slice() : [g.x0, g.x1], W:cv.clientWidth };
+  const cz = g.sorted ? szoom[g.band] : zoom[g.band];
+  const mode = e.shiftKey && cz ? "pan" : "brush";
+  drag = { band:g.band, x0:x, x1:x, mode, sorted:g.sorted,
+           z0:cz ? cz.slice() : [g.x0, g.x1], W:cv.clientWidth };
   cv.setPointerCapture(e.pointerId);
 });
 cv.addEventListener("pointermove", e => {
@@ -1158,11 +1495,16 @@ cv.addEventListener("pointermove", e => {
       if (g){
         const span = drag.z0[1] - drag.z0[0];
         const dnm = -(x - drag.x0) / (drag.W - PADL - PADR) * span;
-        const d = B[drag.band], lo0 = d.wl[0], hi0 = d.wl[d.n - 1];
+        const d = B[drag.band];
+        const full = drag.sorted ? [0, (cur[drag.band] && cur[drag.band].sortPerm
+                                        ? cur[drag.band].sortPerm.length - 1 : 1)]
+                                 : [d.wl[0], d.wl[d.n - 1]];
+        const lo0 = full[0], hi0 = full[1];
         let lo = drag.z0[0] + dnm, hi = drag.z0[1] + dnm;
         if (lo < lo0){ hi += lo0 - lo; lo = lo0; }
         if (hi > hi0){ lo -= hi - hi0; hi = hi0; }
-        zoom[drag.band] = [Math.max(lo0, lo), Math.min(hi0, hi)];
+        const zz = [Math.max(lo0, lo), Math.min(hi0, hi)];
+        if (drag.sorted) szoom[drag.band] = zz; else zoom[drag.band] = zz;
       }
       draw(); return;
     }
@@ -1177,8 +1519,15 @@ cv.addEventListener("pointerup", e => {
       const toNm = px => g.x0 + (px - PADL) / (W - PADL - PADR) * (g.x1 - g.x0);
       let lo = toNm(Math.min(drag.x0, drag.x1)), hi = toNm(Math.max(drag.x0, drag.x1));
       const d = B[drag.band];
-      lo = Math.max(d.wl[0], lo); hi = Math.min(d.wl[d.n - 1], hi);
-      if (hi - lo > 3 * d.step) zoom[drag.band] = [lo, hi];
+      if (drag.sorted){
+        const nMax = cur[drag.band] && cur[drag.band].sortPerm
+          ? cur[drag.band].sortPerm.length - 1 : 1;
+        lo = Math.max(0, Math.round(lo)); hi = Math.min(nMax, Math.round(hi));
+        if (hi - lo >= 8) szoom[drag.band] = [lo, hi];
+      } else {
+        lo = Math.max(d.wl[0], lo); hi = Math.min(d.wl[d.n - 1], hi);
+        if (hi - lo > 3 * d.step) zoom[drag.band] = [lo, hi];
+      }
     }
   }
   drag = null; draw();
@@ -1189,7 +1538,7 @@ cv.addEventListener("pointerleave", () => {
 });
 cv.addEventListener("dblclick", e => {
   const r = cv.getBoundingClientRect(), g = bandAt(e.clientY - r.top);
-  if (g){ zoom[g.band] = null; draw(); }
+  if (g){ if (g.sorted) szoom[g.band] = null; else zoom[g.band] = null; draw(); }
 });
 new ResizeObserver(() => { if (loaded) draw(); }).observe(cv.parentElement);
 

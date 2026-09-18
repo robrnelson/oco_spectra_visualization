@@ -125,6 +125,51 @@ per-absorber breakdown), single-band focus, brush-to-zoom and pan per band,
 snapshot ghost curves for A/B comparison, permalinks, and CSV export alongside the
 2× PNG export.
 
+## Spectral sorting (the "sorted" view)
+
+Follows the method of **Zeng et al. (2018)**. Channels are ordered by ascending
+**clear-sky** radiance — the same scene with AOD = 0 — and that single ordering is
+then applied to every curve drawn, so scenarios stay directly comparable. Saturated
+line cores land on the left, intermediate lines in the middle, continuum on the right.
+
+```
+perm   = argsort(L_clear)      (ascending; AOD = 0, everything else unchanged)
+x-axis = sorted channel index
+y-axis = radiance, reordered by perm
+```
+
+The physical basis, in the paper's words: *"atmospheric aerosols scatter photons back
+to space and therefore reduce the chance of the photons being absorbed by the oxygen…
+Photons scattered by higher aerosol layers undergo shorter absorption paths, thereby
+reducing the O₂ absorption depths."* That is exactly the `f` factor in the scattering
+model above, so the tool reproduces the method's discriminants. Measured on the
+A-band (desert surface, SZA 45°):
+
+| change | continuum (right) | intermediate (middle) | saturated (left) |
+|---|---|---|---|
+| AOD 0 → 1.0 at 800 hPa | **+4.5 %** | +7.6 % | +21 % |
+| layer 1000 → 150 hPa at AOD 0.5 | +0.8 % | **+22.6 %** | +240 % |
+| albedo × 0.6 → × 1.6 | ×2.3 | ×2.3 | ×2.3 |
+
+So the **continuum tracks total AOD**, the **intermediate lines track aerosol layer
+height** (28× more strongly than the continuum does), and **surface albedo scales the
+whole curve without changing its shape** — the intermediate/continuum ratio holds at
+0.3895 / 0.3883 / 0.3876 across that albedo range. That last row is the AOD–albedo
+degeneracy the paper works around, and it is why ALH is separable while AOD is not
+without knowing the surface.
+
+The three regions are shaded and labelled. The cuts used here are clear-sky
+transmittance < 0.05, 0.05–0.80 and ≥ 0.80; those are a **display convention for this
+tool**, not the paper's exact retrieval windows, which are in its supporting
+information. Note also that the paper works in the 1.27 µm O₂ band with a mountaintop
+FTS and reports reflectance, whereas this applies the same construction to the OCO-2
+bands in radiance. One effect it cannot reproduce: the paper's small sorted-curve
+wiggles come from O₂ absorption coefficients varying with pressure and temperature
+across altitudes, and this tool has a single fixed vertical τ profile.
+
+Drag on the sorted axis to zoom into the intermediate region (the paper's Figure 2d
+does the same), and use **snapshot** to freeze one scenario and compare.
+
 ## Controls
 
 | Group | Controls |
@@ -137,7 +182,12 @@ snapshot ghost curves for A/B comparison, permalinks, and CSV export alongside t
 | Sounding | overlay the real sounding, load its L2 state |
 
 Views: **radiance** · **transmittance** (L/L_c, comparable across bands) ·
-**optical depth** (−ln L/L_c, log axis) · **absorbers** (apparent τ per species).
+**optical depth** (−ln L/L_c, log axis) · **absorbers** (apparent τ per species) ·
+**sorted** (spectral sorting after Zeng et al. 2018, see below).
+
+A **docs** button in the header opens an in-app page with the full model description,
+all equations, the approximations, and the citation list — the same material as this
+README, available without leaving the tool.
 
 Plot interaction: drag to zoom a band, shift-drag to pan, double-click to reset.
 
@@ -155,6 +205,11 @@ Plot interaction: drag to zoom a band, shift-drag to pan, double-click to reset.
 - Pick **snow**, switch to the strong-CO₂ band, toggle **spectral albedo**: the
   continuum tilts, because snow's reflectance falls 34 % across that band.
 - Switch to **absorbers**: O₂ owns the A-band; H₂O contaminates the strong-CO₂ band.
+- Switch to **sorted**, focus the **O₂ A** band, set AOD to 0.5, then drag the
+  **aerosol layer** up and down. The middle of the curve lifts strongly while the
+  right-hand continuum barely moves — that separation is what makes aerosol layer
+  height retrievable from an O₂ band. Then change **albedo scale** instead: the whole
+  curve scales and the shape is untouched.
 - Overlay the **sounding**, hit **load L2 state**, then detune XCO₂ and watch the
   residual grow.
 - Drag **XCO₂** across its full 0–800 ppm range: the two CO₂ bands deepen steadily
@@ -237,6 +292,22 @@ files were assembled; the underlying sources are:
 
 Rayleigh optical depth uses the Bodhaine et al. (1999) parameterisation and is added
 here, not present upstream.
+
+Methods and references added by this version:
+
+- Zeng, Z.-C., Natraj, V., Xu, F., Pongetti, T. J., Shia, R.-L., Kort, E. A., Toon,
+  G. C., Sander, S. P., & Yung, Y. L. (2018). Constraining aerosol vertical profile in
+  the boundary layer using hyperspectral measurements of oxygen absorption.
+  *Geophysical Research Letters*, 45(19), 10772–10780.
+  [doi:10.1029/2018GL079286](https://doi.org/10.1029/2018GL079286) — the spectral
+  sorting method used by the **sorted** view.
+- Meador, W. E., & Weaver, W. R. (1980). Two-stream approximations to radiative
+  transfer in planetary atmospheres. *J. Atmos. Sci.*, 37, 630–643 — the beam solution
+  used for the scattering layer.
+- Joseph, J. H., Wiscombe, W. J., & Weinman, J. A. (1976). The delta-Eddington
+  approximation for radiative flux transfer. *J. Atmos. Sci.*, 33, 2452–2459.
+- Bodhaine, B. A., Wood, N. B., Dutton, E. G., & Slusser, J. R. (1999). On Rayleigh
+  optical depth calculations. *J. Atmos. Oceanic Technol.*, 16, 1854–1861.
 
 `orig.html` is a verbatim copy of the upstream widget, kept only for side-by-side
 comparison. It carries no licence notice, so consider removing it from a public
