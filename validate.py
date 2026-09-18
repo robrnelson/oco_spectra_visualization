@@ -99,7 +99,7 @@ def conv_at(x, k, centre, idx):
     """Edge-normalized correlation of x with kernel k, evaluated only at idx.
 
     Evaluating at just the output positions is bit-identical to convolving the
-    whole grid and then subsampling, but costs ~14x less.
+    whole grid and then subsampling, but costs far less (measured ~7x in JS).
     """
     n = len(x)
     K = len(k)
@@ -126,6 +126,9 @@ def albedo_spectrum(band, d, state):
     wl = d["wl"]
     surf = state["surface"]
     if surf == "l2":
+        # per-band L2 albedo as a constant; albedo_slope_l2_per_wn is deliberately
+        # not applied (undocumented reference wavenumber, and it does not improve
+        # the fit) -- see albedoBase() in index.html for the measurements
         base = np.full(len(wl), load("sounding_oco2.json")["meta"]["albedo_l2"][band])
     else:
         alb = load("albedo_surfaces.json")
@@ -170,14 +173,12 @@ def forward(band, state):
     return L, Lc, m, taus
 
 
-def model_at(band, state, idx, legacy_centre=None):
+def model_at(band, state, idx, legacy_centre=False):
     """Convolved radiance and continuum at integer grid indices `idx`.
 
-    legacy_centre defaults to the state's own legacyILS flag, so a selftest case
-    can exercise the legacy path the same way the widget's toggle does.
+    legacy_centre is Python-only, used by regression() to show what the original
+    widget's array-midpoint assumption costs. The widget itself has no such mode.
     """
-    if legacy_centre is None:
-        legacy_centre = bool(state.get("legacyILS", False))
     d = band_data(band)
     L, Lc, m, _ = forward(band, state)
     k, centre = make_kernel(d["ils_dl"], d["ils_r"], d["step"],
@@ -189,7 +190,7 @@ def default_state():
     return dict(xco2=420.0, sza=30.0, vza=0.0, psurf=1013.25, h2o=1.0,
                 aod=0.0, angstrom=1.0, rayleigh=False, surface="dry_grass",
                 albScale=1.0, albSlope=0.0, spectralAlbedo=False,
-                ilsStretch=1.0, shiftNm=0.0, legacyILS=False)
+                ilsStretch=1.0, shiftNm=0.0)
 
 
 def l2_state():
@@ -329,9 +330,39 @@ def regression(rep):
                   f"(rel change {rel:+.2e})")
 
 
+def l2_match(rep):
+    """The widget's "load L2 state" must actually fit the sounding.
+
+    An earlier version also switched on Rayleigh and the L2 aerosol optical depth,
+    and applied one band's albedo slope to all three. Because aerosol here is pure
+    extinction while the L2 albedo was retrieved with full multiple scattering,
+    that double-counted the loss and drove the A-band 3x worse.
+    """
+    print("\n[3] \"load L2 state\" fit quality")
+    st = l2_state()                                    # what the button now sets
+    good = sounding_residuals(st)
+    for band in BANDS:
+        g = good[band]
+        print(f"        {band:6s} rms {g['rms']:6.3f}  ({100*g['rms']/g['cont']:4.2f} % of "
+              f"continuum, bias {g['bias']:+.3f})")
+    rep.check(good["aband"]["rms"] < 4.0,
+              f"A-band rms {good['aband']['rms']:.3f} < 4.0 at the L2 state")
+    rep.check(abs(good["aband"]["bias"]) < 1.5,
+              f"A-band bias {good['aband']['bias']:+.3f} within +/-1.5 (not systematically dark)")
+
+    # show why aerosol/Rayleigh are deliberately left off
+    M = load("sounding_oco2.json")["meta"]
+    bad = sounding_residuals(dict(st, rayleigh=True, aod=M["aod_total_l2"], angstrom=1.0))
+    print(f"        if aerosol+Rayleigh were loaded too: A-band rms would be "
+          f"{bad['aband']['rms']:.3f} (bias {bad['aband']['bias']:+.3f}) — "
+          f"{bad['aband']['rms']/good['aband']['rms']:.1f}x worse, hence excluded")
+    rep.check(bad["aband"]["rms"] > 1.5 * good["aband"]["rms"],
+              "extinction-only aerosol demonstrably degrades the A-band fit")
+
+
 def write_selftest(rep):
     """Sample the model over several states so the JS can be checked against it."""
-    print("\n[3] selftest reference")
+    print("\n[4] selftest reference")
     M = load("sounding_oco2.json")["meta"]
     cases = []
 
@@ -350,9 +381,11 @@ def write_selftest(rep):
         spectralAlbedo=True, albScale=1.4, albSlope=-1.2e-4)
     add("ocean_dark", surface="ocean", spectralAlbedo=True, aod=0.25, rayleigh=True,
         xco2=380.0, psurf=1030.0)
-    # exercise the widget's "legacy ILS centre" toggle, which reproduces the
-    # original's array-midpoint assumption
-    cases.append(("legacy_ils", dict(l2_state(), legacyILS=True)))
+    # the extremes the sliders now reach
+    add("xco2_zero", xco2=0.0)
+    add("vacuum", psurf=0.0, xco2=0.0, h2o=0.0)
+    add("psurf_zero_humid", psurf=0.0)
+    add("ils_razor", ilsStretch=0.1, surface="desert", spectralAlbedo=True)
 
     ref = {
         "generated_by": "validate.py",
@@ -374,8 +407,7 @@ def write_selftest(rep):
             # same flags model_at used, or the recorded kernel metadata would
             # describe a different kernel than the radiances above
             k, centre = make_kernel(d["ils_dl"], d["ils_r"], d["step"],
-                                    st["ilsStretch"], st["shiftNm"],
-                                    bool(st.get("legacyILS", False)))
+                                    st["ilsStretch"], st["shiftNm"])
             entry["bands"][band] = {
                 "idx": [int(i) for i in idx],
                 "wl_nm": [float(d["wl0"] + i * d["step"]) for i in idx],
@@ -394,17 +426,22 @@ def write_selftest(rep):
     rep.check(size > 0, f"wrote {os.path.relpath(out, HERE)} "
                         f"({len(ref['cases'])} cases, {size/1024:.1f} kB)")
 
-    # sanity: the cases must actually differ, or the selftest proves nothing
-    a = ref["cases"][0]["bands"]["aband"]["L"]
+    # sanity: the cases must actually differ somewhere, or the selftest proves
+    # nothing. Not per-band: XCO2 cannot move the A-band at all (tau_co2 is zero
+    # there), which is itself the point of the O2 band.
+    base = ref["cases"][0]["bands"]
     for c in ref["cases"][1:]:
-        b = c["bands"]["aband"]["L"]
-        rep.check(any(abs(x - y) > 1e-6 for x, y in zip(a, b)),
-                  f"case '{c['name']}' differs from 'default' in the A-band")
+        moved = [b for b in BANDS
+                 if any(abs(x - y) > 1e-6
+                        for x, y in zip(base[b]["L"], c["bands"][b]["L"]))]
+        rep.check(bool(moved),
+                  f"case '{c['name']}' differs from 'default' (bands: "
+                  f"{','.join(moved) or 'NONE'})")
 
 
 def physics_summary():
     """Magnitudes of the newly added terms, for the record."""
-    print("\n[4] magnitudes of the added physics (airmass 2.10, AOD 0.071, alpha 1)")
+    print("\n[5] magnitudes of the added physics (airmass 2.10, AOD 0.071, alpha 1)")
     M = load("sounding_oco2.json")["meta"]
     m = 1 / math.cos(math.radians(M["sza"])) + 1 / math.cos(math.radians(M["vza"]))
     for band, lam in (("aband", 765.0), ("wco2", 1605.0), ("sco2", 2062.0)):
@@ -434,6 +471,7 @@ def main():
     rep = Report(args.quiet)
     validate_data(rep)
     regression(rep)
+    l2_match(rep)
     write_selftest(rep)
     physics_summary()
 

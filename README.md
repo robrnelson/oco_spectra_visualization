@@ -41,9 +41,9 @@ slider is a separate column scale factor.
 - **Spectral albedo is sampled at 5 nm** (the ECOSTRESS grid): 5 points across the
   A-band, 10 across the strong-CO₂ band. Enough for a continuum tilt, not for fine
   spectral structure.
-- **The albedo slope control is global**, while L2 reports a slope per band. `load
-  L2 state` therefore applies the slope of the focused band (weak CO₂ when showing
-  all three).
+- **The albedo slope control is global**, while L2 reports a slope per band. It is a
+  manual exploration knob; `load L2 state` sets it to 0 rather than guessing a
+  convention (see "About load L2 state" below).
 - **Noise is a display effect**, σ = continuum/SNR, hashed deterministically on
   sample index so the curve does not shimmer while you drag other sliders.
 
@@ -60,8 +60,8 @@ sits 0.0090 nm away — 22 % of that band's 0.0415 nm FWHM. Placing the kernel u
 | weak CO₂ | 1.152 | 1.134 | 3.84 % → 3.78 % |
 | strong CO₂ | 0.330 | 0.330 | already centred |
 
-(RMS of sounding − model, W m⁻² µm⁻¹ sr⁻¹, at the L2 retrieval state.) The
-**legacy ILS centre** toggle reproduces the original behaviour so you can see it.
+(RMS of sounding − model, W m⁻² µm⁻¹ sr⁻¹, at the L2 retrieval state.)
+`validate.py` asserts all six numbers, so the fix cannot silently regress.
 
 **Faster.** The original convolves both `L` and `L_c` across the whole fine grid,
 then plots every 4th point. Evaluating the convolution only at the output positions
@@ -79,8 +79,10 @@ At the bundled sounding's L2 AOD of 0.071 and airmass 2.10, aerosol dims the A-b
 **Data the original discarded.** `albedo_surfaces.json` carries full 400–2200 nm
 reflectance spectra but only its scalar band means were used — snow varies 34 %
 across the strong-CO₂ band and conifer 8 % across the weak-CO₂ band. The `spectral
-albedo` toggle shows the difference. `sounding_oco2.json`'s `albedo_slope_l2_per_wn`,
-`aod_total_l2` and `xco2_uncertainty_ppm` are now used too.
+albedo` toggle shows the difference. From `sounding_oco2.json`, the per-band
+`albedo_l2`, `vza` and `xco2_uncertainty_ppm` are now used, and `aod_total_l2` is
+reported in the footnote — though deliberately not loaded into the model, for the
+reason given under "About load L2 state" below.
 
 **More to explore.** Four view modes (radiance, transmittance, optical depth,
 per-absorber breakdown), single-band focus, brush-to-zoom and pan per band,
@@ -92,9 +94,9 @@ snapshot ghost curves for A/B comparison, permalinks, and CSV export alongside t
 | Group | Controls |
 |---|---|
 | Geometry | solar zenith angle, viewing zenith angle |
-| Atmosphere | XCO₂, surface pressure, H₂O column scale, aerosol AOD₅₅₀, Ångström exponent, Rayleigh |
+| Atmosphere | XCO₂ (0–440 ppm), surface pressure (0–1030 hPa), H₂O column scale, aerosol AOD₅₅₀, Ångström exponent, Rayleigh |
 | Surface | 5 ECOSTRESS surfaces + L2, spectral-albedo toggle, albedo scale, albedo slope |
-| Instrument | ILS width (0.5–3× FWHM), spectral shift (±0.05 nm), SNR, noise, legacy ILS centre |
+| Instrument | ILS width (0.1–3× FWHM), spectral shift (±0.05 nm), SNR, noise |
 | Sounding | overlay the real sounding, load its L2 state |
 
 Views: **radiance** · **transmittance** (L/L_c, comparable across bands) ·
@@ -111,8 +113,15 @@ Plot interaction: drag to zoom a band, shift-drag to pan, double-click to reset.
 - Switch to **absorbers**: O₂ owns the A-band; H₂O contaminates the strong-CO₂ band.
 - Overlay the **sounding**, hit **load L2 state**, then detune XCO₂ and watch the
   residual grow.
-- Toggle **legacy ILS centre** with the sounding on and watch the A-band residual
-  jump from 3.9 to 6.6.
+- Drag **XCO₂ to 0**: the two CO₂ bands lose their CO₂ lines entirely (what is left
+  is H₂O), and the A-band does not move by a single digit — `tau_co2` is zero there.
+- Set **surface pressure to 0**: the A-band goes transparent, because O₂ scales with
+  pressure. H₂O stays until you zero its own slider — it is a fixed tropospheric
+  column in the data, not pressure-scaled. Zero both for a true vacuum, where
+  transmittance is exactly 1.
+- Narrow the **ILS to 0.1×**: absorption lines deepen towards their line-by-line
+  depth. The weak-CO₂ band changes most (deepest line 0.23 → 0.95 in absorption),
+  because its lines are narrowest relative to its ILS.
 
 ## Files
 
@@ -123,6 +132,27 @@ Plot interaction: drag to zoom a band, shift-drag to pan, double-click to reset.
 | `selftest_headless.js` | Runs the real `index.html` script under `gjs` with a DOM shim, for CI without a browser. |
 | `data/*.json` | Inputs, mirrored unmodified from the upstream site. |
 | `orig.html` | The original widget, for comparison. |
+
+## About "load L2 state"
+
+It sets XCO₂, SZA, VZA, surface pressure and the per-band retrieved albedo, and
+gives an A-band residual of 3.88 (3.0 % of continuum). Two things it deliberately
+does **not** do:
+
+- **It does not load `aod_total_l2` or enable Rayleigh.** The L2 albedo was retrieved
+  with a full multiple-scattering model, in which aerosol does not simply attenuate
+  the beam. Adding it here as pure extinction double-counts the loss and drives the
+  A-band 3× worse — rms 3.88 → 11.51, with the model 11 W m⁻² µm⁻¹ sr⁻¹ too dark.
+  Raise the aerosol slider yourself to see the effect; just don't expect a better fit.
+- **It does not apply `albedo_slope_l2_per_wn`.** The reference wavenumber that slope
+  is defined against is not recorded in the file, and measured against the sounding
+  it does not help: the weak-CO₂ residual is already flat (0.23 % trend across the
+  band) with no slope, and degrades to 1.44 % with it. Use the albedo slope slider to
+  tilt by hand.
+
+An earlier version did both, and also applied one band's slope to all three (a −4.8 %
+spurious tilt across the A-band). `validate.py` now asserts the A-band fit quality so
+this cannot regress.
 
 ## Attribution
 
@@ -157,11 +187,12 @@ and sounding overlap, then asserts the six residual numbers in the table above.
 
 `selftest_headless.js` extracts the actual `<script>` from `index.html`, boots it
 against a shimmed DOM with `?selftest=1`, and exits non-zero on failure. Current
-status: **384 values across 8 parameter sets match to 4.9e-15** (float round-off;
-the gate is 1e-9), and **33 render configurations** — every view × focus × overlay
-combination, plus snapshot and zoom — draw without throwing. The parameter sets
-cover the defaults, the L2 state, heavy aerosol, humid/low-pressure, broadened and
-narrowed ILS with spectral shifts, a dark ocean scene, and the legacy ILS centring.
+status: **528 values across 11 parameter sets match to 4.9e-15** (float round-off;
+the gate is 1e-9), and **39 render configurations** — every view × focus × overlay
+combination, plus snapshot, zoom, and the slider extremes — draw without throwing.
+The parameter sets cover the defaults, the L2 state, heavy aerosol, humid/low-pressure,
+broadened and narrowed ILS with spectral shifts, a dark ocean scene, zero XCO₂, zero
+surface pressure, a full vacuum, and a 0.1× razor ILS.
 
 The same check runs in the browser via `?selftest=1`, reported in a banner.
 

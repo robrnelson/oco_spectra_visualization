@@ -104,9 +104,9 @@
       <div class="grp">
         <h2>Atmosphere</h2>
         <div class="ctl"><label>XCO₂ <output id="o_xco2"></output></label>
-          <input type="range" id="xco2" min="380" max="440" step="0.5"></div>
+          <input type="range" id="xco2" min="0" max="440" step="0.5"></div>
         <div class="ctl"><label>surface pressure <output id="o_psurf"></output></label>
-          <input type="range" id="psurf" min="700" max="1030" step="1"></div>
+          <input type="range" id="psurf" min="0" max="1030" step="1"></div>
         <div class="ctl"><label>H₂O column scale <output id="o_h2o"></output></label>
           <input type="range" id="h2o" min="0" max="3" step="0.05"></div>
         <div class="ctl"><label>aerosol AOD @550 nm <output id="o_aod"></output></label>
@@ -114,7 +114,7 @@
         <div class="ctl"><label>Ångström exponent <output id="o_angstrom"></output></label>
           <input type="range" id="angstrom" min="0" max="2" step="0.05"></div>
         <div class="toggles"><button class="chip" id="rayleigh">Rayleigh</button></div>
-        <div class="hint">O₂ and CO₂ columns scale with surface pressure; H₂O is a separate column scale. Aerosol and Rayleigh are <b>extinction only</b> — no scattering source term.</div>
+        <div class="hint">O₂, CO₂ and Rayleigh scale with surface pressure, so at 0 hPa they vanish — but H₂O does not follow (it is a fixed tropospheric column in the data), so zero its own slider too for a true vacuum. Aerosol and Rayleigh are <b>extinction only</b>: no scattering source term, so dimming is overestimated.</div>
       </div>
 
       <div class="grp">
@@ -131,16 +131,15 @@
       <div class="grp">
         <h2>Instrument</h2>
         <div class="ctl"><label>ILS width <output id="o_ilsStretch"></output></label>
-          <input type="range" id="ilsStretch" min="0.5" max="3" step="0.01"></div>
+          <input type="range" id="ilsStretch" min="0.1" max="3" step="0.01"></div>
         <div class="ctl"><label>spectral shift <output id="o_shiftNm"></output></label>
           <input type="range" id="shiftNm" min="-0.05" max="0.05" step="0.001"></div>
         <div class="ctl"><label>continuum SNR <output id="o_snr"></output></label>
           <input type="range" id="snr" min="50" max="1000" step="10"></div>
         <div class="toggles">
           <button class="chip" id="noise">noise</button>
-          <button class="chip" id="legacyILS" title="Reproduce the original widget's ILS mis-centering">legacy ILS centre</button>
         </div>
-        <div class="hint">The real OCO-2 ILS, resampled. <b>legacy ILS centre</b> reproduces the original's bug of assuming the kernel is centred on its array midpoint.</div>
+        <div class="hint">The real OCO-2 ILS, resampled and placed at Δλ = 0. Narrowing towards 0.1× approaches the raw line-by-line spectrum; the sampling density follows the ILS width so fine settings are not aliased.</div>
       </div>
 
       <div class="grp">
@@ -243,12 +242,12 @@ function defaults(){
   return { xco2:420, sza:30, vza:0, psurf:1013.25, h2o:1, aod:0, angstrom:1,
            rayleigh:false, surface:"dry_grass", albScale:1, albSlope:0,
            spectralAlbedo:false, ilsStretch:1, shiftNm:0,
-           noise:false, snr:400, legacyILS:false,
+           noise:false, snr:400,
            view:"radiance", focus:"all", obs:false };
 }
 const NUM = ["xco2","sza","vza","psurf","h2o","aod","angstrom","albScale","albSlope",
              "ilsStretch","shiftNm","snr"];
-const BOOL = ["rayleigh","spectralAlbedo","noise","legacyILS","obs"];
+const BOOL = ["rayleigh","spectralAlbedo","noise","obs"];
 const SLIDERS = ["sza","vza","xco2","psurf","h2o","aod","angstrom","albScale","albSlope",
                  "ilsStretch","shiftNm","snr"];
 
@@ -315,14 +314,9 @@ function interpZero(xp, fp, x){
 /* Resample the ILS onto the tau grid spacing.
    Kernel index j sits at offset (j - centre)*step from the output wavelength, so
    putting index `centre` at the output wavelength places delta_lambda = 0 there.
-   legacy=true reproduces the original widget's array-midpoint assumption. */
-function makeKernel(d, stretch, shiftNm, legacy){
-  if (legacy){
-    const k = Float64Array.from(d.ils_r);
-    let s = 0; for (let i = 0; i < k.length; i++) s += k[i];
-    for (let i = 0; i < k.length; i++) k[i] /= s;
-    return { k, centre:(k.length - 1) >> 1 };
-  }
+   The original widget instead assumed the array midpoint was the centre, which
+   mis-registers the A-band by 0.009 nm -- 22 % of its 0.0415 nm FWHM. */
+function makeKernel(d, stretch, shiftNm){
   const dl = d.ils_dl, step = d.step, last = dl.length - 1;
   const jmin = Math.ceil((stretch * dl[0] + shiftNm) / step);
   const jmax = Math.floor((stretch * dl[last] + shiftNm) / step);
@@ -360,6 +354,13 @@ function albedoBase(band, st){
   if (d.albBase[key]) return d.albBase[key];
   const a = new Float64Array(d.n);
   if (st.surface === "l2"){
+    // The per-band L2 albedo, as a constant. albedo_slope_l2_per_wn is NOT applied:
+    // its reference wavenumber is not documented in the file, and measured against
+    // the sounding it does not help -- the weak-CO2 residual is already flat
+    // (0.23 % trend across the band) with no slope and degrades to 1.4 % with it.
+    // It was retrieved jointly with aerosol inside a multiple-scattering model, so
+    // its continuum shape does not transfer here. Use the albedo slope slider to
+    // tilt by hand if you want to explore it.
     a.fill(SND ? SND.meta.albedo_l2[band] : 0.3);
   } else if (st.spectralAlbedo){
     const xw = ALB.wl, yv = ALB[st.surface];
@@ -419,7 +420,7 @@ function forward(band, st){
 function modelAt(band, st, idx, reuseLc){
   const d = B[band];
   const m = forward(band, st);
-  const { k, centre } = makeKernel(d, st.ilsStretch, st.shiftNm, st.legacyILS);
+  const { k, centre } = makeKernel(d, st.ilsStretch, st.shiftNm);
   return { L:convAt(d.L, k, centre, idx),
            Lc:reuseLc || convAt(d.Lc, k, centre, idx),
            m, kernel:k, centre };
@@ -429,14 +430,14 @@ function modelAt(band, st, idx, reuseLc){
    dragging those sliders can reuse the previous convolution outright. */
 function lcSignature(band, st, idx){
   return [band, st.sza, st.vza, st.surface, st.albScale, st.albSlope,
-          st.spectralAlbedo, st.ilsStretch, st.shiftNm, st.legacyILS,
+          st.spectralAlbedo, st.ilsStretch, st.shiftNm,
           idx.length, idx[0], idx[idx.length - 1]].join("|");
 }
 
 /* per-absorber apparent transmittance, convolved (absorbers view) */
 function absorberCurves(band, st, idx){
   const d = B[band], n = d.n, ps = st.psurf / P0;
-  const { k, centre } = makeKernel(d, st.ilsStretch, st.shiftNm, st.legacyILS);
+  const { k, centre } = makeKernel(d, st.ilsStretch, st.shiftNm);
   const mu0 = Math.cos(st.sza * Math.PI / 180);
   const m = 1 / mu0 + 1 / Math.cos(st.vza * Math.PI / 180);
   const aer = aerTemplate(band, st.angstrom);
@@ -481,20 +482,29 @@ function visibleRange(band){
   const d = B[band];
   return zoom[band] || [d.wl[0], d.wl[d.n - 1]];
 }
-function outIdx(band, nWant){
+/* Output sample positions for one band.
+   Density tracks the *effective* ILS width, not just the pixel count: a narrowed
+   ILS resolves finer structure, and sampling it at screen resolution would alias
+   real absorption lines into noise-looking spikes. Cost stays roughly flat,
+   because the kernel length shrinks in proportion to the ILS width -- so
+   nOut x K is about constant across the whole ILS-width range. */
+function outIdx(band, st, pxWidth){
   const d = B[band], [lo, hi] = visibleRange(band);
   const i0 = Math.max(0, Math.floor((lo - d.wl0) / d.step));
   const i1 = Math.min(d.n - 1, Math.ceil((hi - d.wl0) / d.step));
   const span = i1 - i0;
   if (span < 1) return Int32Array.from([i0, Math.min(d.n - 1, i0 + 1)]);
-  const N = Math.max(2, Math.min(nWant, span + 1));
+  const fwhm = d.ilsMeta.fwhm_nm * st.ilsStretch;
+  const forRes = fwhm > 0 ? Math.ceil(5 * (hi - lo) / fwhm) : span + 1;
+  const forPx = Math.round(pxWidth * 2);
+  const N = Math.max(2, Math.min(span + 1, Math.max(forPx, forRes)));
   const idx = new Int32Array(N);
   for (let j = 0; j < N; j++) idx[j] = i0 + Math.round(j * span / (N - 1));
   return idx;
 }
 
-function computeBand(band, st, nWant){
-  const d = B[band], idx = outIdx(band, nWant);
+function computeBand(band, st, pxWidth){
+  const d = B[band], idx = outIdx(band, st, pxWidth);
   // a few slots, so the current state and the snapshot ghost don't evict each other
   const sig = lcSignature(band, st, idx);
   d._lc = d._lc || new Map();
@@ -556,13 +566,13 @@ function draw(){
   if (!loaded) return;
   const t0 = performance.now();
   const W = cv.clientWidth || 900;
-  const nWant = Math.max(400, Math.min(3000, Math.round((W - PADL - PADR) * 2)));
+  const pxWidth = Math.max(200, W - PADL - PADR);
   cur = {}; ghost = {};
   for (const b of panelsShown()){
-    cur[b] = computeBand(b, state, nWant);
+    cur[b] = computeBand(b, state, pxWidth);
     // ghost keeps the snapshot's physics but is plotted in the current view
     if (snapshot) ghost[b] = computeBand(b,
-      Object.assign({}, snapshot, { noise:false, view:state.view }), nWant);
+      Object.assign({}, snapshot, { noise:false, view:state.view }), pxWidth);
   }
   lastMs = performance.now() - t0;
   render(cv.getContext("2d"), W, cv.clientHeight || 500, 1);
@@ -913,14 +923,13 @@ function captions(){
   parts.push(`Line-by-line at ${ORDER.map(b => B[b] ? B[b].step : "?").join(" / ")} nm, then convolved with the OCO-2 ILS (FWHM ${ORDER.map(b => B[b] ? B[b].ilsMeta.fwhm_nm.toFixed(3) : "—").join(" / ")} nm × ${state.ilsStretch.toFixed(2)}).`);
   parts.push(`Solar continuum TSIS-1 HSRS × Toon lines. Surface reflectance from the ECOSTRESS library.`);
   parts.push(`Aerosol and Rayleigh are treated as pure extinction along the slant path — there is no scattering source term, so dimming is overestimated and this is not a substitute for a real radiative-transfer solve.`);
-  if (state.legacyILS) parts.push(`⚠ legacy ILS centring is ON: the kernel is placed on its array midpoint rather than at Δλ = 0, which mis-registers the A-band model by 0.009 nm (22 % of FWHM).`);
   if (state.noise) parts.push(`Noise is a deterministic display effect, σ = continuum/SNR, hashed on sample index.`);
   if (state.obs && SND) parts.push(`Sounding ${SND.meta.sounding_id} (${SND.meta.surface}, ${SND.meta.time_utc.slice(0,10)}), shown ×${(1/(SND.meta.polarization_factor||0.5)).toFixed(0)} because OCO-2 measures a single linear polarization. L2 XCO₂ ${SND.meta.xco2_l2_ppm.toFixed(2)} ± ${SND.meta.xco2_uncertainty_ppm.toFixed(2)} ppm, AOD ${SND.meta.aod_total_l2.toFixed(3)}.`);
   note.innerHTML = parts.join(" ");
 
   const sh = document.getElementById("sndHint");
   sh.innerHTML = SND
-    ? `${SND.meta.sounding_id} — ${SND.meta.surface}, ${SND.meta.time_utc.slice(0,10)}, ${SND.meta.operation_mode}. <b>load L2 state</b> sets SZA/VZA, surface pressure, AOD, and the retrieved per-band albedo and slope.`
+    ? `${SND.meta.sounding_id} — ${SND.meta.surface}, ${SND.meta.time_utc.slice(0,10)}, ${SND.meta.operation_mode}. <b>load L2 state</b> sets XCO₂, SZA/VZA, surface pressure and the retrieved per-band albedo + slope. It leaves aerosol and Rayleigh <b>off</b> on purpose: the L2 albedo already absorbs those, and adding them as pure extinction makes the A-band far too dark.`
     : `sounding_oco2.json not found — overlay unavailable.`;
 }
 
@@ -971,10 +980,15 @@ function wireControls(){
     const M = SND.meta;
     Object.assign(state, {
       xco2:M.xco2_l2_ppm, sza:M.sza, vza:M.vza, psurf:M.surface_pressure_hpa,
-      surface:"l2", spectralAlbedo:false, albScale:1,
-      albSlope:M.albedo_slope_l2_per_wn[state.focus === "all" ? "wco2" : state.focus],
-      aod:M.aod_total_l2, angstrom:1, rayleigh:true, h2o:1,
-      ilsStretch:1, shiftNm:0, legacyILS:false, obs:true,
+      surface:"l2", spectralAlbedo:false, albScale:1, albSlope:0,
+      // Deliberately NOT loading aod_total_l2 and NOT enabling Rayleigh. The L2
+      // albedo was retrieved with a full multiple-scattering model, in which
+      // aerosol does not simply attenuate the beam; adding it here as pure
+      // extinction double-counts the loss and drove the A-band 7.7 W m-2 um-1
+      // sr-1 too dark (rms 3.9 -> 11.0). Raise the aerosol slider yourself to
+      // see the effect -- just don't expect it to improve the fit.
+      aod:0, angstrom:1, rayleigh:false, h2o:1,
+      ilsStretch:1, shiftNm:0, obs:true,
     });
     draw();
   };
@@ -1206,6 +1220,26 @@ async function selftest(){
       }
     }
   }
+  // the extremes the sliders now reach
+  for (const [label, over] of [
+        ["xco2=0",       { xco2:0 }],
+        ["psurf=0",      { psurf:0 }],
+        ["vacuum",       { xco2:0, psurf:0, h2o:0 }],
+        ["ILS 0.1x",     { ilsStretch:0.1 }],
+        ["ILS 3x",       { ilsStretch:3 }],
+        ["ILS 0.1x zoom",{ ilsStretch:0.1 }],
+      ]){
+    try {
+      state = Object.assign(JSON.parse(JSON.stringify(saved)),
+        { view:"radiance", focus:"all" }, over);
+      zoom = { aband:null, wco2:null, sco2:null };
+      if (label.endsWith("zoom")) zoom.aband = [B.aband.wl[0] + 3, B.aband.wl[0] + 3.4];
+      const t0 = performance.now(); draw(); renders++;
+      lines.push(`  extreme ${label.padEnd(15)} ${(performance.now()-t0).toFixed(1)} ms`);
+    } catch(e){ bad++; lines.push(`  extreme ${label}: ${e}`); }
+  }
+  zoom = { aband:null, wco2:null, sco2:null };
+
   // snapshot + zoom together, in the default view
   try {
     state = Object.assign(JSON.parse(JSON.stringify(saved)), { view:"radiance", focus:"all" });
