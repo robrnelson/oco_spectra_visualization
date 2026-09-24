@@ -74,7 +74,61 @@ phase-function angular dependence; and the diffuse surface path is charged the
 direct-beam gas slant path. It is a two-stream approximation, not a benchmark RT
 code.
 
+### Chlorophyll fluorescence (SIF)
+
+SIF is an **additive surface source**, not a reflectance. It emits in the far red only, so
+it is present in the A-band and **identically zero** in the two SWIR CO₂ bands. It leaves
+the surface, so it crosses the gas **once** rather than twice:
+
+```
+L   += SIF · T_diff/(1 − a·s) · exp(−τ_gas / cos VZA)
+L_c += SIF · T_diff/(1 − a·s)
+```
+
+In a line with τ_gas = 3 that is 32× less attenuation than reflected sunlight at SZA 30°,
+and 403× at SZA 60°. So SIF **fills in deep lines** far more than it lifts the continuum:
+measured here, SIF = 2 raises the continuum 0.92 % but the deep line cores 2.60 % —
+**2.8× stronger in the cores**. That asymmetry is the whole basis of SIF retrieval. Because
+the solar spectrum here carries the Toon Fraunhofer lines while SIF is flat, in-filling of
+**solar Fraunhofer lines** also appears — the signal OCO-2 actually uses at 757 and 771 nm.
+Range 0–4 W m⁻² µm⁻¹ sr⁻¹ (= mW m⁻² nm⁻¹ sr⁻¹); typical vegetated scenes are 0.5–2.5.
+Treated as spectrally flat, whereas real retrievals fit a low-order polynomial.
+
+### Pressure broadening — what you can and cannot see
+
+The *consequences* of pressure broadening are in the data and visible; its *pressure
+dependence* is not.
+
+- **Visible.** The lines are genuinely pressure-broadened. An isolated A-band O₂ line at
+  769.13 nm has FWHM 0.0040 nm = 0.068 cm⁻¹ (HWHM 0.034 cm⁻¹) against a Doppler HWHM of
+  0.013 cm⁻¹ at 250 K — ~2.6× wider than Doppler-limited. But the OCO-2 ILS FWHM is 10.4×
+  the line FWHM, so you must narrow the **ILS width** to ~**0.1–0.25×** before the shape
+  emerges at all.
+- **Not visible.** τ is a *single fixed vertical profile* scaled by psurf/P₀. The surface
+  pressure slider changes absorber **amount**, never line **width** — the τ FWHM stays at
+  0.00400 nm at 1013, 500 and 200 hPa. Real physics would narrow the lines too.
+- **A trap.** The *apparent* width in transmittance does shrink with pressure (0.0100 nm at
+  1013 hPa → 0.0070 nm at 200 hPa), but only because the line is less saturated. That is
+  not broadening.
+
+So the tool captures the *amount* half of why the A-band constrains surface pressure; the
+line-shape half needs per-layer τ, which this data set does not provide.
+
+### The AOD–albedo degeneracy
+
+With the aerosol at the surface (`f = 1`) both radiance terms share `exp(−m·τ_gas)`, so the
+model factorises into (system albedo) × `exp(−m·τ_gas)`. AOD and surface albedo then enter
+through a single scalar and **neither can change the spectrum's shape** — `L/L_c` becomes
+independent of AOD, albedo, ω₀ and g (verified to machine precision for albedo). Shape
+residual after best-fit scaling: 0.003–0.014 % of continuum. Geometry does not break it.
+
+What does: **lifting the layer** (0.008 % at the surface → 0.11 % at 1 km → 0.35 % at 3 km,
+and geometry then helps — 0.35 % → 1.19 % going to SZA 65°), **Rayleigh** (pinned at f = 0.5,
+worth ~0.25 % by itself), and **cross-band leverage** (τ_aer A-band : strong CO₂ = 2.7 : 1 at
+å = 1, so all three bands together separate them if the surface spectral shape is constrained).
+
 ### Other approximations you should know about
+
 - **Spectral albedo is sampled at 5 nm** (the ECOSTRESS grid): 5 points across the
   A-band, 10 across the strong-CO₂ band. Enough for a continuum tilt, not for fine
   spectral structure.
@@ -177,9 +231,14 @@ does the same), and use **snapshot** to freeze one scenario and compare.
 | Geometry | solar zenith angle, viewing zenith angle |
 | Atmosphere | XCO₂ (0–800 ppm), surface pressure (0–1030 hPa), H₂O column scale (0–10×) |
 | Aerosol & scattering | AOD₅₅₀ (0–1.5), Ångström exponent, single-scatter albedo ω₀ (0.5–1), asymmetry g (0–0.9), layer pressure (50–1030 hPa), two-stream scattering toggle, Rayleigh |
-| Surface | 5 ECOSTRESS surfaces + L2, spectral-albedo toggle, albedo scale, albedo slope |
+| Surface | 5 ECOSTRESS surfaces + L2, spectral-albedo toggle, albedo scale, albedo slope, SIF (0–4 W m⁻² µm⁻¹ sr⁻¹) |
 | Instrument | ILS width (0.1–3× FWHM), spectral shift (±0.05 nm), SNR, noise |
 | Sounding | overlay the real sounding, load its L2 state |
+
+In **radiance** and **transmittance** the model line takes its band's own colour — O₂ A-band
+blue, weak CO₂ green, strong CO₂ red. The other views keep one model colour, since
+**absorbers** already colours by species and **optical depth** and **sorted** are for
+comparing bands against each other.
 
 Views: **radiance** · **transmittance** (L/L_c, comparable across bands) ·
 **optical depth** (−ln L/L_c, log axis) · **absorbers** (apparent τ per species) ·
@@ -205,6 +264,10 @@ Plot interaction: drag to zoom a band, shift-drag to pan, double-click to reset.
 - Pick **snow**, switch to the strong-CO₂ band, toggle **spectral albedo**: the
   continuum tilts, because snow's reflectance falls 34 % across that band.
 - Switch to **absorbers**: O₂ owns the A-band; H₂O contaminates the strong-CO₂ band.
+- Raise **SIF** to 2 over **conifer forest** and watch the A-band line cores lift while the
+  continuum barely moves — then check the two CO₂ bands, which do not move at all.
+- Narrow the **ILS to 0.1×** and zoom into a single O₂ line to see the pressure-broadened
+  line shape the ILS normally hides.
 - Switch to **sorted**, focus the **O₂ A** band, set AOD to 0.5, then drag the
   **aerosol layer** up and down. The middle of the curve lifts strongly while the
   right-hand continuum barely moves — that separation is what makes aerosol layer
@@ -333,7 +396,7 @@ combination, plus snapshot, zoom, and the slider extremes — draw without throw
 The parameter sets cover the defaults, the L2 state, heavy aerosol, humid/low-pressure,
 broadened and narrowed ILS with spectral shifts, a dark ocean scene, zero XCO₂, 800 ppm
 XCO₂, 10× H₂O, zero surface pressure, a full vacuum, a 0.1× razor ILS, extinction-only
-scattering, and thick-high and strongly-absorbing aerosol layers.
+scattering, thick-high and strongly-absorbing aerosol layers, and three SIF cases.
 
 The same check runs in the browser via `?selftest=1`, reported in a banner.
 

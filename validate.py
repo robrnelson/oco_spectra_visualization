@@ -265,26 +265,40 @@ def forward(band, state):
     """
     d = band_data(band)
     mu0 = math.cos(math.radians(state["sza"]))
-    m = 1.0 / mu0 + 1.0 / math.cos(math.radians(state["vza"]))
+    muv = math.cos(math.radians(state["vza"]))
+    m = 1.0 / mu0 + 1.0 / muv
     taus = optical_depths(band, d, state)
     tau_gas = taus["co2"] + taus["o2"] + taus["h2o"]
     a = albedo_spectrum(band, d, state)
     solar = d["e0"] * mu0 / math.pi
+    # Chlorophyll fluorescence emits in the far red only, so it exists in the
+    # A-band and is identically zero in the two SWIR CO2 bands. It leaves the
+    # surface, so it crosses the gas ONCE (1/muv) rather than twice (m) -- which
+    # is exactly why it fills in the deep lines relative to reflected sunlight.
+    sif = float(state.get("sif", 0.0)) if band == "aband" else 0.0
 
     t_sc, w_sc, g_sc, f_sc, _, _ = scattering_layer(band, d, state)
     # scalar condition so index.html can mirror the branch exactly
     have_sc = state["aod"] > 0 or (state["rayleigh"] and state["psurf"] > 0)
     if not state.get("scatter", True) or not have_sc:
         # extinction only: the old behaviour, kept so the difference is visible
+        tau_all = tau_gas + t_sc
         Lc = solar * a
-        L = Lc * np.exp(-m * (tau_gas + t_sc))
+        L = Lc * np.exp(-m * tau_all)
+        if sif > 0:
+            Lc = Lc + sif
+            L = L + sif * np.exp(-tau_all / muv)
         return L, Lc, m, taus
 
     Rb, Tb = two_stream_beam(t_sc, w_sc, g_sc, mu0)
     s, Td = two_stream_diffuse(t_sc, w_sc, g_sc)
-    surf = Tb * a * Td / np.maximum(1 - a * s, 1e-12)
+    up = Td / np.maximum(1 - a * s, 1e-12)      # surface -> space, incl. layer bounces
+    surf = Tb * a * up
     Lc = solar * (Rb + surf)
     L = solar * (Rb * np.exp(-m * f_sc * tau_gas) + surf * np.exp(-m * tau_gas))
+    if sif > 0:
+        Lc = Lc + sif * up
+        L = L + sif * up * np.exp(-tau_gas / muv)
     return L, Lc, m, taus
 
 
@@ -306,7 +320,7 @@ def default_state():
                 aod=0.0, angstrom=1.0, rayleigh=False, surface="dry_grass",
                 albScale=1.0, albSlope=0.0, spectralAlbedo=False,
                 ilsStretch=1.0, shiftNm=0.0,
-                scatter=True, ssa=0.95, asym=0.65, aerP=800.0)
+                scatter=True, ssa=0.95, asym=0.65, aerP=800.0, sif=0.0)
 
 
 def l2_state():
@@ -573,6 +587,39 @@ def sorting_checks(rep):
               f"(ratio spread {100*spread:.2f} % < 1 %)")
 
 
+def sif_checks(rep):
+    """Chlorophyll fluorescence: far-red only, and it must fill in lines more than
+    it lifts the continuum, because it crosses the gas once instead of twice."""
+    print("\n[6] SIF")
+    d = band_data("aband")
+    idx = np.arange(int(0.05 * d["n"]), int(0.95 * d["n"]), 2)
+    base = dict(default_state(), surface="conifer", spectralAlbedo=True, sza=30.0)
+
+    for band in BANDS:
+        dd = band_data(band)
+        ii = np.arange(int(0.1 * dd["n"]), int(0.9 * dd["n"]), 4)
+        L4, _, _ = model_at(band, dict(base, sif=4.0), ii)
+        L0, _, _ = model_at(band, dict(base, sif=0.0), ii)
+        moved = np.abs(np.asarray(L4) - np.asarray(L0)).max() > 0
+        rep.check(moved == (band == "aband"),
+                  f"{band}: SIF {'affects' if band == 'aband' else 'is exactly zero in'} "
+                  f"this band (far-red emission only)")
+
+    L0, Lc0, _ = model_at("aband", dict(base, sif=0.0), idx)
+    L0, Lc0 = np.asarray(L0), np.asarray(Lc0)
+    t0 = L0 / Lc0
+    cont, core = t0 > 0.95, t0 < 0.15
+    L2, _, _ = model_at("aband", dict(base, sif=2.0), idx)
+    L2 = np.asarray(L2)
+    dc = L2[cont].mean() / L0[cont].mean() - 1
+    dk = L2[core].mean() / L0[core].mean() - 1
+    print(f"        SIF 2.0: continuum +{100*dc:.2f} %, deep line cores +{100*dk:.2f} % "
+          f"-> {dk/dc:.1f}x stronger in the cores")
+    rep.check(dk > 2 * dc,
+              f"SIF lifts deep line cores >2x more than the continuum ({dk/dc:.1f}x)")
+    rep.check(dc > 0, "SIF raises the continuum too (it is an additive source)")
+
+
 def l2_match(rep):
     """The widget's "load L2 state" must actually fit the sounding.
 
@@ -581,7 +628,7 @@ def l2_match(rep):
     extinction while the L2 albedo was retrieved with full multiple scattering,
     that double-counted the loss and drove the A-band 3x worse.
     """
-    print("\n[6] \"load L2 state\" fit quality")
+    print("\n[7] \"load L2 state\" fit quality")
     st = l2_state()                                    # what the button now sets
     good = sounding_residuals(st)
     for band in BANDS:
@@ -606,7 +653,7 @@ def l2_match(rep):
 
 def write_selftest(rep):
     """Sample the model over several states so the JS can be checked against it."""
-    print("\n[7] selftest reference")
+    print("\n[8] selftest reference")
     M = load("sounding_oco2.json")["meta"]
     cases = []
 
@@ -638,6 +685,10 @@ def write_selftest(rep):
         ssa=0.99, asym=0.80, aerP=200.0, surface="conifer", spectralAlbedo=True)
     add("scatter_absorbing_low", aod=0.8, rayleigh=True, scatter=True,
         ssa=0.50, asym=0.10, aerP=1000.0, sza=65.0, vza=35.0)
+    add("sif_only", sif=2.5, surface="conifer", spectralAlbedo=True)
+    add("sif_scatter", sif=4.0, surface="conifer", spectralAlbedo=True,
+        aod=0.4, rayleigh=True, aerP=700.0, sza=55.0, vza=25.0)
+    add("sif_extinction", sif=1.5, aod=0.3, rayleigh=True, scatter=False)
 
     ref = {
         "generated_by": "validate.py",
@@ -693,7 +744,7 @@ def write_selftest(rep):
 
 def physics_summary():
     """Magnitudes of the newly added terms, for the record."""
-    print("\n[8] magnitudes of the added physics (airmass 2.10, AOD 0.071, alpha 1)")
+    print("\n[9] magnitudes of the added physics (airmass 2.10, AOD 0.071, alpha 1)")
     M = load("sounding_oco2.json")["meta"]
     m = 1 / math.cos(math.radians(M["sza"])) + 1 / math.cos(math.radians(M["vza"]))
     for band, lam in (("aband", 765.0), ("wco2", 1605.0), ("sco2", 2062.0)):
@@ -725,6 +776,7 @@ def main():
     regression(rep)
     scattering_checks(rep)
     sorting_checks(rep)
+    sif_checks(rep)
     l2_match(rep)
     write_selftest(rep)
     physics_summary()

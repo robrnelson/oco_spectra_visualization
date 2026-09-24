@@ -11,6 +11,8 @@
     --model:#1f6fb2; --model-fill:rgba(31,111,178,0.10);
     --obs:#c92a5a; --resid:#6b7d8f; --cont:#a9791f; --ghost:#9aa7b4;
     --co2:#1f6fb2; --o2:#2e8b57; --h2o:#6a5acd; --ray:#3d9bbf; --aer:#b5651d;
+    --m-aband:#1f6fb2; --m-wco2:#2e7d32; --m-sco2:#c0392b;
+    --mf-aband:rgba(31,111,178,0.10); --mf-wco2:rgba(46,125,50,0.10); --mf-sco2:rgba(192,57,43,0.10);
     --chip-on-bg:#1d2530; --chip-on-fg:#ffffff; --accent:#1f6fb2;
   }
   [data-theme="dark"]{
@@ -19,6 +21,8 @@
     --model:#5aa9e6; --model-fill:rgba(90,169,230,0.14); --obs:#ff5c8a;
     --resid:#9fb0c0; --cont:#e0b64a; --ghost:#6b7a89;
     --co2:#5aa9e6; --o2:#5fc48a; --h2o:#a99bf0; --ray:#6fc7e6; --aer:#e0a05a;
+    --m-aband:#5aa9e6; --m-wco2:#66bb6a; --m-sco2:#ff6f61;
+    --mf-aband:rgba(90,169,230,0.14); --mf-wco2:rgba(102,187,106,0.14); --mf-sco2:rgba(255,111,97,0.14);
     --chip-on-bg:#e8edf2; --chip-on-fg:#0b0f14; --accent:#5aa9e6;
   }
   *{box-sizing:border-box;margin:0;padding:0}
@@ -161,7 +165,9 @@
           <input type="range" id="albScale" min="0.2" max="2" step="0.01"></div>
         <div class="ctl"><label>albedo slope <output id="o_albSlope"></output></label>
           <input type="range" id="albSlope" min="-2e-4" max="2e-4" step="2e-6"></div>
-        <div class="hint">ECOSTRESS reflectance spectra. Toggle <b>spectral albedo</b> off to fall back to a single band mean — snow varies 34 % across the strong-CO₂ band, so the difference is visible.</div>
+        <div class="ctl"><label>SIF @ 757 nm <output id="o_sif"></output></label>
+          <input type="range" id="sif" min="0" max="4" step="0.05"></div>
+        <div class="hint">ECOSTRESS reflectance spectra. Toggle <b>spectral albedo</b> off to fall back to a single band mean — snow varies 34 % across the strong-CO₂ band, so the difference is visible. <b>SIF</b> is chlorophyll fluorescence: far-red only, so it affects the A-band alone. It leaves the surface, so it crosses the gas <b>once</b> rather than twice — which is why it fills in deep O₂ and solar Fraunhofer lines far more than it lifts the continuum.</div>
       </div>
 
       <div class="grp">
@@ -302,6 +308,27 @@ L_c = (E&#8320; cosSZA / &pi;) [ R                  + T&middot;a&middot;T_diff  
       </ul>
       <p>Turn <b>two-stream scattering</b> off to recover extinction-only and see the difference.</p>
 
+      <h3>Chlorophyll fluorescence (SIF)</h3>
+      <p>SIF is an <b>additive surface source</b>, not a reflectance. It emits in the far red
+      only, so it is present in the O&#8322; A-band and <b>identically zero</b> in the two SWIR
+      CO&#8322; bands. Crucially it leaves the surface, so it crosses the gas <b>once</b> rather
+      than twice:</p>
+      <pre>L    += SIF &middot; T_diff/(1 &minus; a&middot;s) &middot; exp(&minus;&tau;_gas / cos VZA)
+L_c  += SIF &middot; T_diff/(1 &minus; a&middot;s)</pre>
+      <p>Reflected sunlight is attenuated by exp(&minus;m&middot;&tau;), fluorescence only by
+      exp(&minus;&tau;/cosVZA). In a line with &tau;_gas&nbsp;=&nbsp;3 at SZA&nbsp;30&deg; that is a factor
+      of 32 less attenuation, and 403 at SZA&nbsp;60&deg;. So SIF <b>fills in deep lines</b> much
+      more than it lifts the continuum &mdash; measured here, SIF&nbsp;=&nbsp;2 raises the continuum
+      0.92&nbsp;% but the deep line cores 2.60&nbsp;%, i.e. <b>2.8&times; stronger in the cores</b>.
+      That asymmetry is the entire basis of SIF retrieval.</p>
+      <p>Because the solar spectrum here carries the Toon Fraunhofer line list while SIF is
+      spectrally flat, the in-filling of <b>solar Fraunhofer lines</b> also appears &mdash; which
+      is the signal OCO-2 actually uses in its 757 and 771&nbsp;nm micro-windows. The slider
+      spans 0&ndash;4&nbsp;W&nbsp;m&#8315;&sup2;&nbsp;&micro;m&#8315;&sup1;&nbsp;sr&#8315;&sup1;
+      (= mW&nbsp;m&#8315;&sup2;&nbsp;nm&#8315;&sup1;&nbsp;sr&#8315;&sup1;), covering the observed range;
+      typical vegetated scenes sit near 0.5&ndash;2.5. SIF is treated as spectrally flat across
+      the band, whereas real retrievals allow a low-order polynomial.</p>
+
       <h3>Instrument line shape</h3>
       <p>The radiance is formed at line-by-line resolution and then convolved with the real OCO-2
       ILS, evaluated as an edge-normalised correlation. Two things worth recording:</p>
@@ -347,6 +374,30 @@ y-axis = radiance, reordered by perm</pre>
       the O&#8322; absorption coefficients varying with pressure and temperature at different altitudes.
       This tool has a single fixed vertical &tau; profile, so it cannot reproduce that effect.</p>
 
+      <h3>Pressure broadening &mdash; what you can and cannot see</h3>
+      <p>The <i>consequences</i> of pressure broadening are baked into the tabulated &tau; and are
+      visible; the <i>pressure dependence</i> of it is not.</p>
+      <ul>
+        <li><b>Visible.</b> The lines you see are genuinely pressure-broadened. An isolated
+        A-band O&#8322; line at 769.13&nbsp;nm has FWHM 0.0040&nbsp;nm = 0.068&nbsp;cm&#8315;&sup1;,
+        i.e. HWHM 0.034&nbsp;cm&#8315;&sup1; against a Doppler HWHM of only
+        0.013&nbsp;cm&#8315;&sup1; at 250&nbsp;K &mdash; so the column-integrated line is ~2.6&times;
+        wider than Doppler-limited. To actually resolve that shape you must narrow the ILS:
+        the OCO-2 ILS FWHM is 10.4&times; the line FWHM, so at 1&times; the shape is completely
+        smeared, and only near <b>0.1&ndash;0.25&times;</b> does it emerge.</li>
+        <li><b>Not visible.</b> &tau; here is a <i>single fixed vertical profile</i> scaled by
+        psurf/P&#8320;. Moving the surface pressure slider changes the absorber <b>amount</b> and
+        never the line <b>width</b> &mdash; the &tau; FWHM stays at 0.00400&nbsp;nm at 1013, 500
+        and 200&nbsp;hPa. Real physics would narrow the lines as well as weaken them.</li>
+        <li><b>A trap.</b> The <i>apparent</i> width in transmittance does shrink with pressure
+        (0.0100&nbsp;nm at 1013&nbsp;hPa to 0.0070&nbsp;nm at 200&nbsp;hPa), but purely because the
+        line is less saturated &mdash; not because the Lorentz width moved. Do not read that as
+        broadening.</li>
+        <li>Consequently the tool captures only the <i>amount</i> half of why the A-band
+        constrains surface pressure; the line-shape half needs per-layer &tau;, which this data
+        set does not provide.</li>
+      </ul>
+
       <h3>Approximations and limits</h3>
       <ul>
         <li><b>One homogeneous scattering layer</b>, not a profile. It is a two-stream approximation,
@@ -362,6 +413,14 @@ y-axis = radiance, reordered by perm</pre>
         (the weak-CO&#8322; residual is already flat at 0.23&nbsp;% trend and degrades to 1.44&nbsp;% with it).</li>
         <li><b>Noise is a display effect</b>, &sigma; = continuum/SNR, hashed deterministically on
         sample index so the curve does not shimmer while other sliders move.</li>
+        <li><b>AOD and surface albedo are exactly degenerate when the aerosol sits at the
+        surface.</b> With f&nbsp;=&nbsp;1 both terms share exp(&minus;m&middot;&tau;_gas), so the radiance
+        factorises into (system albedo) &times; exp(&minus;m&middot;&tau;_gas) and neither parameter can
+        change the spectrum&rsquo;s <i>shape</i> &mdash; only its level. L/L_c is then independent of
+        AOD, albedo, &omega;&#8320; and g. Geometry does not break this. What does: lifting the layer
+        (0.008&nbsp;% shape residual at the surface, 0.11&nbsp;% at 1&nbsp;km, 0.35&nbsp;% at 3&nbsp;km),
+        Rayleigh (pinned at f&nbsp;=&nbsp;0.5, worth ~0.25&nbsp;% on its own), and cross-band leverage
+        (&tau;_aer(A-band):&tau;_aer(strong&nbsp;CO&#8322;) = 2.7:1 at &aring;&nbsp;=&nbsp;1).</li>
         <li>Residuals against the real sounding will <b>not</b> go to zero. L2 Full Physics carries a
         multi-layer scattering atmosphere, retrieved aerosol types and profiles, temperature and water
         profiles, per-footprint dispersion and ILS, and zero-level offsets. Loading a few of its
@@ -376,6 +435,12 @@ y-axis = radiance, reordered by perm</pre>
       combination to check no code path throws. <code>validate_scattering.py</code> is the Monte Carlo
       check of the scattering model. <code>selftest_headless.js</code> runs this page&rsquo;s real script
       under <code>gjs</code> with a DOM shim, for CI without a browser.</p>
+
+      <h3>Colour conventions</h3>
+      <p>In the <b>radiance</b> and <b>transmittance</b> views the model line takes its band&rsquo;s
+      own colour: O&#8322; A-band blue, weak CO&#8322; green, strong CO&#8322; red. The other views keep a
+      single model colour, because <b>absorbers</b> already colours by species and
+      <b>optical depth</b> and <b>sorted</b> are meant for comparing bands against one another.</p>
 
       <h3>References</h3>
       <ul class="refs">
@@ -444,6 +509,12 @@ const VIEWS = { radiance:"radiance", transmittance:"transmittance", od:"optical 
    left / middle / right. Region cuts are on clear-sky transmittance -- a display
    convention here, not the paper's exact retrieval windows. */
 const SORT_SAT = 0.05, SORT_CONT = 0.80;
+/* Views where the model line takes the band's own colour (A-band blue, weak CO2
+   green, strong CO2 red). The other views keep one model colour: 'absorbers'
+   already colours by species, and 'od'/'sorted' compare bands against each other. */
+const PERBAND_VIEWS = { radiance:1, transmittance:1 };
+const modelCol  = (band, view) => PERBAND_VIEWS[view] ? C.mBand[band] : C.model;
+const modelFill = (band, view) => PERBAND_VIEWS[view] ? C.mFill[band] : C.modelFill;
 const ABSORBERS = [["co2","CO₂","--co2"],["o2","O₂","--o2"],["h2o","H₂O","--h2o"],
                    ["ray","Rayleigh","--ray"],["aer","aerosol","--aer"]];
 
@@ -462,24 +533,27 @@ function readPalette(){
   C = { hair:g("--hairline"), text:g("--text"), muted:g("--muted"), faint:g("--faint"),
         model:g("--model"), modelFill:g("--model-fill"), obs:g("--obs"), resid:g("--resid"),
         cont:g("--cont"), ghost:g("--ghost"), panel:g("--panel"), accent:g("--accent"),
-        co2:g("--co2"), o2:g("--o2"), h2o:g("--h2o"), ray:g("--ray"), aer:g("--aer") };
+        co2:g("--co2"), o2:g("--o2"), h2o:g("--h2o"), ray:g("--ray"), aer:g("--aer"),
+        // per-band model colours, used in the radiance and transmittance views
+        mBand:{ aband:g("--m-aband"), wco2:g("--m-wco2"), sco2:g("--m-sco2") },
+        mFill:{ aband:g("--mf-aband"), wco2:g("--mf-wco2"), sco2:g("--mf-sco2") } };
 }
 setTheme(Q.get("theme") === "dark");
 
 /* ---- state ---------------------------------------------------------- */
 function defaults(){
   return { xco2:420, sza:30, vza:0, psurf:1013.25, h2o:1, aod:0, angstrom:1,
-           rayleigh:false, scatter:true, ssa:0.95, asym:0.65, aerP:800,
+           rayleigh:false, scatter:true, ssa:0.95, asym:0.65, aerP:800, sif:0,
            surface:"dry_grass", albScale:1, albSlope:0,
            spectralAlbedo:false, ilsStretch:1, shiftNm:0,
            noise:false, snr:400,
            view:"radiance", focus:"all", obs:false };
 }
 const NUM = ["xco2","sza","vza","psurf","h2o","aod","angstrom","ssa","asym","aerP",
-             "albScale","albSlope","ilsStretch","shiftNm","snr"];
+             "sif","albScale","albSlope","ilsStretch","shiftNm","snr"];
 const BOOL = ["rayleigh","scatter","spectralAlbedo","noise","obs"];
 const SLIDERS = ["sza","vza","xco2","psurf","h2o","aod","angstrom","ssa","asym","aerP",
-                 "albScale","albSlope","ilsStretch","shiftNm","snr"];
+                 "sif","albScale","albSlope","ilsStretch","shiftNm","snr"];
 
 let state = defaults();
 let zoom = { aband:null, wco2:null, sco2:null };   // [lo,hi] nm per band
@@ -691,8 +765,13 @@ function twoStreamDiffuse(tau, w, g){
 function forward(band, st){
   const d = B[band], n = d.n, L = d.L, Lc = d.Lc;
   const mu0 = Math.cos(st.sza * Math.PI / 180);
-  const m = 1 / mu0 + 1 / Math.cos(st.vza * Math.PI / 180);
+  const muv = Math.cos(st.vza * Math.PI / 180);
+  const m = 1 / mu0 + 1 / muv;
   const ps = st.psurf / P0, sx = st.xco2 / XCO2_REF;
+  // Chlorophyll fluorescence emits in the far red only: present in the A-band,
+  // identically zero in the two SWIR CO2 bands. Emitted at the surface, so it
+  // crosses the gas ONCE (1/muv), not twice (m) -- hence the line in-filling.
+  const sif = band === "aband" ? (st.sif || 0) : 0;
   const base = albedoBase(band, st);
   const aer = st.aod > 0 ? aerTemplate(band, st.angstrom) : null;
   const nuC = 1e7 / (0.5 * (d.wl[0] + d.wl[n-1]));
@@ -711,8 +790,13 @@ function forward(band, st){
     if (a < 0) a = 0;
     const solar = e0[i] * mu0 / Math.PI;
     if (!useSc){
+      const tAll = tGas + tRay + tAer;
       Lc[i] = solar * a;
-      L[i] = Lc[i] * Math.exp(-m * (tGas + tRay + tAer));
+      L[i] = Lc[i] * Math.exp(-m * tAll);
+      if (sif > 0){
+        Lc[i] += sif;
+        L[i] += sif * Math.exp(-tAll / muv);
+      }
       continue;
     }
     const tSc = tRay + tAer;
@@ -722,9 +806,14 @@ function forward(band, st){
     const fSc = tSc > 0 ? (tRay * 0.5 + tAer * fAer) / tSc : 1.0;
     const rt = twoStreamBeam(tSc, w, g, mu0);
     const dt = twoStreamDiffuse(tSc, w, g);
-    const surf = rt[1] * a * dt[1] / Math.max(1 - a * dt[0], 1e-12);
+    const up = dt[1] / Math.max(1 - a * dt[0], 1e-12);   // surface -> space
+    const surf = rt[1] * a * up;
     Lc[i] = solar * (rt[0] + surf);
     L[i] = solar * (rt[0] * Math.exp(-m * fSc * tGas) + surf * Math.exp(-m * tGas));
+    if (sif > 0){
+      Lc[i] += sif * up;
+      L[i] += sif * up * Math.exp(-tGas / muv);
+    }
   }
   return m;
 }
@@ -748,7 +837,7 @@ function modelAt(band, st, idx, reuseLc){
 function lcSignature(band, st, idx){
   return [band, st.sza, st.vza, st.psurf, st.surface, st.albScale, st.albSlope,
           st.spectralAlbedo, st.ilsStretch, st.shiftNm,
-          st.scatter, st.aod, st.angstrom, st.rayleigh, st.ssa, st.asym, st.aerP,
+          st.scatter, st.aod, st.angstrom, st.rayleigh, st.ssa, st.asym, st.aerP, st.sif,
           idx.length, idx[0], idx[idx.length - 1]].join("|");
 }
 
@@ -1080,12 +1169,12 @@ function render(ctx, W, H, scale){
       if (g && g.wl.length === N) line(j => yOf(g, j, view), C.ghost, 1.1, [2, 3]);
       // model, with a light fill in radiance view
       if (view === "radiance"){
-        ctx.fillStyle = C.modelFill; ctx.beginPath();
+        ctx.fillStyle = modelFill(band, view); ctx.beginPath();
         ctx.moveTo(px(X_OF(0)), py(ax.min));
         for (let j = 0; j < N; j++) ctx.lineTo(px(X_OF(j)), py(Math.min(c.L[j], ax.max)));
         ctx.lineTo(px(X_OF(N-1)), py(ax.min)); ctx.closePath(); ctx.fill();
       }
-      line(j => yOf(c, j, view), C.model, 1.1);
+      line(j => yOf(c, j, view), modelCol(band, view), 1.1);
     }
 
     // ---- real sounding + residual strip -------------------------------
@@ -1173,7 +1262,7 @@ function render(ctx, W, H, scale){
         const Lh = interpAt(c.wl, c.L, xw), Lch = interpAt(c.wl, c.Lc, xw);
         ctx.beginPath();
         ctx.arc(hoverX, py(Math.min(Math.max(yOf2(Lh, Lch, view), ax.min), ax.max)), 3.2, 0, 2*Math.PI);
-        ctx.fillStyle = C.model; ctx.fill();
+        ctx.fillStyle = modelCol(band, view); ctx.fill();
         ctx.lineWidth = 1.4; ctx.strokeStyle = C.panel; ctx.stroke();
         txt += `  model ${fmtVal(yOf2(Lh, Lch, view), view)}`;
         if (view === "radiance") txt += `  cont ${Lch.toFixed(2)}`;
@@ -1195,7 +1284,7 @@ function render(ctx, W, H, scale){
     // brush rectangle
     if (scale === 1 && drag && drag.band === band && drag.mode === "brush"
         && Math.abs(drag.x1 - drag.x0) > 2){
-      ctx.fillStyle = C.modelFill;
+      ctx.fillStyle = modelFill(band, view);
       ctx.fillRect(Math.min(drag.x0, drag.x1), top + PADT,
                    Math.abs(drag.x1 - drag.x0), PH - PADT - PADB);
       ctx.strokeStyle = C.accent; ctx.lineWidth = 1;
@@ -1276,6 +1365,8 @@ function readouts(){
   g("o_asym").textContent = state.asym.toFixed(2);
   g("o_aerP").textContent = state.aerP.toFixed(0) + " hPa ≈ " + pToZ(state.aerP).toFixed(1) + " km"
     + (state.aod > 0 ? "  f=" + Math.max(0, Math.min(1, state.aerP/Math.max(state.psurf,1e-9))).toFixed(2) : "");
+  g("o_sif").textContent = state.sif.toFixed(2) + " W m⁻² µm⁻¹ sr⁻¹"
+    + (state.sif > 0 && cur.aband ? "  (" + (100 * state.sif / cur.aband.contMax).toFixed(1) + " % of A-band cont.)" : "");
   g("o_albScale").textContent = state.albScale.toFixed(2) + " ×";
   g("o_albSlope").textContent = state.albSlope.toExponential(1) + " /cm⁻¹";
   g("o_ilsStretch").textContent = state.ilsStretch.toFixed(2) + " × FWHM";
@@ -1305,7 +1396,9 @@ function buildLegend(){
     for (const [key, lbl] of ABSORBERS) items.push([C[key], lbl, "solid"]);
   } else {
     if (state.view === "radiance") items.push([C.cont, "no absorption", "dashed"]);
-    items.push([C.model, "model", "solid"]);
+    if (PERBAND_VIEWS[state.view])
+      for (const b of panelsShown()) items.push([C.mBand[b], "model " + BANDS[b].short, "solid"]);
+    else items.push([C.model, "model", "solid"]);
     if (snapshot) items.push([C.ghost, "snapshot", "dashed"]);
     if (state.obs && SND) items.push([C.obs, "OCO-2 sounding", "solid"]);
     if (state.obs && SND) items.push([C.resid, "residual", "solid"]);
@@ -1697,6 +1790,8 @@ async function selftest(){
         ["extinct only", { aod:0.4, rayleigh:true, scatter:false }],
         ["thick high aer",{ aod:1.5, rayleigh:true, scatter:true, ssa:0.99, aerP:200 }],
         ["absorbing aer", { aod:0.8, rayleigh:true, scatter:true, ssa:0.5, asym:0.1 }],
+        ["SIF 4",         { sif:4, surface:"conifer", spectralAlbedo:true }],
+        ["SIF + aerosol", { sif:2.5, aod:0.4, rayleigh:true, aerP:700 }],
       ]){
     try {
       state = Object.assign(JSON.parse(JSON.stringify(saved)),
